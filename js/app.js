@@ -30,7 +30,7 @@
   const DEFAULTS = {
     mmpp: 0,
     operator: '',
-    bins: '0.2,0.5,0.8,1.0,1.2,1.5,2.0',
+    bins: '2,5,8,10,12,15,20',
     polarity: 'auto',
     minlen: 1,
     maxlen: 50,
@@ -42,8 +42,16 @@
     die: '',
     specs: DEFAULT_SPECS,
   };
-  const settings = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('aicam-settings') || '{}') };
+  const stored = JSON.parse(localStorage.getItem('aicam-settings') || '{}');
+  const settings = { ...DEFAULTS, ...stored };
   if (!Array.isArray(settings.specs) || !settings.specs.length) settings.specs = DEFAULT_SPECS;
+  // ย้ายหน่วยช่วงความยาวจาก ซม. เป็น มม. (ครั้งเดียว เฉพาะค่าเก่าที่บันทึกไว้เป็น ซม.)
+  if (stored.bins && stored.binsUnit !== 'mm') {
+    settings.bins = stored.bins.split(',')
+      .map(s => parseFloat(s.trim())).filter(v => !isNaN(v) && v > 0)
+      .map(v => +(v * 10).toFixed(2)).join(',');
+  }
+  settings.binsUnit = 'mm';
 
   function saveSettings() {
     localStorage.setItem('aicam-settings', JSON.stringify(settings));
@@ -444,6 +452,18 @@
     });
   }
 
+  /** รายงานเก่าบันทึกช่วงเป็น ซม. — แปลงป้ายเป็น มม. ให้ตรงหน่วยปัจจุบัน */
+  function normalizeDist(dist) {
+    return (dist || []).map(d => {
+      if (d.min_mm !== undefined || d.min_cm === undefined) return d;
+      const label = d.label.replace(/\d+(\.\d+)?/g, m => {
+        const v = parseFloat(m) * 10;
+        return Number.isInteger(v) ? String(v) : v.toFixed(1);
+      });
+      return { ...d, label };
+    });
+  }
+
   function renderDistTable(tbody, distribution) {
     tbody.innerHTML = distribution.map(d =>
       `<tr><td>${d.label}</td><td>${d.count}</td><td>${d.pct}%</td></tr>`).join('');
@@ -600,7 +620,7 @@
     }
     rows.push([],
       [t('th_range_cm'), t('th_count'), t('th_pct')],
-      ...(s.distribution || []).map(d => [d.label, d.count, d.pct]),
+      ...normalizeDist(s.distribution).map(d => [d.label, d.count, d.pct]),
       [],
       [t('th_no'), t('th_len'), t('th_dia'), 'R', 'G', 'B'],
       ...(pellets || []).map((p, i) => [i + 1, p.length_mm, p.diameter_mm, p.color?.r, p.color?.g, p.color?.b]));
@@ -713,9 +733,10 @@
           <button class="btn" id="m-csv">${t('csv_btn')}</button>
           <button class="btn" id="m-del" style="color:var(--danger)">${t('rep_delete')}</button>
         </div>`;
-      renderDistTable($('m-dist'), s.distribution || []);
+      const dist = normalizeDist(s.distribution);
+      renderDistTable($('m-dist'), dist);
       renderCharts('m-chart-bar', 'm-chart-donut',
-        { distribution: s.distribution || [], count: s.pellet_count }, state.charts);
+        { distribution: dist, count: s.pellet_count }, state.charts);
       $('m-share').addEventListener('click', () =>
         shareReport(id, s.sample_name, s.pellet_count, (+s.avg_length_mm).toFixed(1)));
       $('m-csv').addEventListener('click', () => downloadCsv(`pellet-${id.slice(0, 8)}.csv`, sessionCsvRows(s, s.pellets)));

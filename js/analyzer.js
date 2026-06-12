@@ -367,8 +367,8 @@ const Analyzer = (() => {
     };
   }
 
-  /** สถิติ + การกระจายตามช่วง (binsCm หน่วย ซม.) */
-  function computeStats(pellets, binsCm) {
+  /** สถิติ + การกระจายตามช่วง (binsMm หน่วย มม.) */
+  function computeStats(pellets, binsMm) {
     const lens = pellets.map(p => p.length_mm);
     const dias = pellets.map(p => p.diameter_mm);
     const n = lens.length;
@@ -376,7 +376,7 @@ const Analyzer = (() => {
     const sd = (a, m) => Math.sqrt(a.reduce((s, v) => s + (v - m) ** 2, 0) / (a.length > 1 ? a.length - 1 : 1));
     const avgLen = mean(lens), avgDia = mean(dias);
 
-    const edges = binsCm.slice().sort((a, b) => a - b);
+    const edges = binsMm.slice().sort((a, b) => a - b);
     const bins = [];
     bins.push({ label: `<${edges[0]}`, min: 0, max: edges[0], count: 0 });
     for (let i = 0; i < edges.length - 1; i++) {
@@ -384,13 +384,12 @@ const Analyzer = (() => {
     }
     bins.push({ label: `>${edges[edges.length - 1]}`, min: edges[edges.length - 1], max: Infinity, count: 0 });
     for (const L of lens) {
-      const cm = L / 10;
       for (const b of bins) {
-        if (cm >= b.min && cm < b.max) { b.count++; break; }
+        if (L >= b.min && L < b.max) { b.count++; break; }
       }
     }
     const distribution = bins.map(b => ({
-      label: b.label, min_cm: b.min, max_cm: b.max === Infinity ? null : b.max,
+      label: b.label, min_mm: b.min, max_mm: b.max === Infinity ? null : b.max,
       count: b.count, pct: n ? +(b.count * 100 / n).toFixed(1) : 0,
     }));
 
