@@ -1,14 +1,19 @@
 /* ===========================================================
  * analyzer.js — ตรวจจับและวัดขนาดเม็ดอาหารจากภาพถ่าย (pure JS)
- * ขั้นตอน: grayscale → Otsu threshold → morphological open
- *          → connected components → PCA วัดยาว/เส้นผ่าศูนย์กลาง
+ *
+ * ขั้นตอน:
+ *  1. แก้แสงไม่สม่ำเสมอ (background flattening ด้วย integral image)
+ *  2. Otsu threshold + เลือกขั้วอัตโนมัติ
+ *  3. morphological open + เติมรูภายในเม็ด (hole filling)
+ *  4. connected components
+ *  5. แยกเม็ดที่ติดกันแบบหัวต่อหัว (neck split จากโปรไฟล์ความกว้าง)
+ *  6. PCA วัดความยาว / เส้นผ่าศูนย์กลาง = median ความกว้างช่วงกลางเม็ด
  * =========================================================== */
 
 const Analyzer = (() => {
 
-  const PROC_MAX = 1600; // ย่อภาพให้ด้านยาวสุดไม่เกินนี้ก่อนประมวลผล
+  const PROC_MAX = 1800; // ย่อภาพให้ด้านยาวสุดไม่เกินนี้ก่อนประมวลผล
 
-  /** วาดภาพลง canvas ขนาดประมวลผล แล้วคืน {canvas, scale} (scale = orig/proc) */
   function toProcCanvas(img) {
     const ow = img.naturalWidth || img.width;
     const oh = img.naturalHeight || img.height;
@@ -37,6 +42,32 @@ const Analyzer = (() => {
     return thr;
   }
 
+  /** ลบพื้นหลังแสงไม่สม่ำเสมอ: gray - boxBlur(gray, r) + 128 (ใช้ integral image) */
+  function flattenIllumination(gray, w, h) {
+    const integ = new Float64Array((w + 1) * (h + 1));
+    for (let y = 0; y < h; y++) {
+      let rowSum = 0;
+      for (let x = 0; x < w; x++) {
+        rowSum += gray[y * w + x];
+        integ[(y + 1) * (w + 1) + (x + 1)] = integ[y * (w + 1) + (x + 1)] + rowSum;
+      }
+    }
+    const r = Math.max(20, Math.round(Math.max(w, h) / 12));
+    const out = new Uint8Array(w * h);
+    for (let y = 0; y < h; y++) {
+      const y1 = Math.max(0, y - r), y2 = Math.min(h, y + r + 1);
+      for (let x = 0; x < w; x++) {
+        const x1 = Math.max(0, x - r), x2 = Math.min(w, x + r + 1);
+        const area = (y2 - y1) * (x2 - x1);
+        const s = integ[y2 * (w + 1) + x2] - integ[y1 * (w + 1) + x2]
+                - integ[y2 * (w + 1) + x1] + integ[y1 * (w + 1) + x1];
+        const v = gray[y * w + x] - s / area + 128;
+        out[y * w + x] = v < 0 ? 0 : v > 255 ? 255 : v | 0;
+      }
+    }
+    return out;
+  }
+
   function erodeDilate(src, w, h, mode) {
     const dst = new Uint8Array(w * h);
     for (let y = 1; y < h - 1; y++) {
@@ -51,7 +82,28 @@ const Analyzer = (() => {
     return dst;
   }
 
-  /** RGB (0-255) → CIELAB (D65) */
+  /** เติมรูภายในเม็ด: flood พื้นหลังจากขอบภาพ จุดที่ไม่ใช่เม็ดและไปไม่ถึง = รู → เติม */
+  function fillHoles(mask, w, h) {
+    const visited = new Uint8Array(w * h);
+    const stack = [];
+    for (let x = 0; x < w; x++) { stack.push(x); stack.push((h - 1) * w + x); }
+    for (let y = 0; y < h; y++) { stack.push(y * w); stack.push(y * w + w - 1); }
+    while (stack.length) {
+      const i = stack.pop();
+      if (visited[i] || mask[i]) continue;
+      visited[i] = 1;
+      const x = i % w, y = (i / w) | 0;
+      if (x > 0) stack.push(i - 1);
+      if (x < w - 1) stack.push(i + 1);
+      if (y > 0) stack.push(i - w);
+      if (y < h - 1) stack.push(i + w);
+    }
+    for (let i = 0; i < mask.length; i++) {
+      if (!mask[i] && !visited[i]) mask[i] = 1; // รูภายใน → เติม
+    }
+    return mask;
+  }
+
   function rgb2lab(r, g, b) {
     let [rr, gg, bb] = [r, g, b].map(v => {
       v /= 255;
@@ -69,35 +121,126 @@ const Analyzer = (() => {
     return Math.sqrt((lab1.l - lab2.l) ** 2 + (lab1.a - lab2.a) ** 2 + (lab1.b - lab2.b) ** 2);
   }
 
+  function median(arr) {
+    if (!arr.length) return 0;
+    const a = arr.slice().sort((x, y) => x - y);
+    const m = a.length >> 1;
+    return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2;
+  }
+
+  /** วัดก้อนพิกเซลหนึ่งก้อนด้วย PCA + โปรไฟล์ความกว้างตามแกนหลัก */
+  function measureComponent(px, w, data) {
+    const n = px.length;
+    let sx = 0, sy = 0, touchBorder = false;
+    for (const i of px) {
+      const x = i % w, y = (i / w) | 0;
+      sx += x; sy += y;
+    }
+    const mx = sx / n, my = sy / n;
+    let cxx = 0, cyy = 0, cxy = 0;
+    for (const i of px) {
+      const dx = (i % w) - mx, dy = ((i / w) | 0) - my;
+      cxx += dx * dx; cyy += dy * dy; cxy += dx * dy;
+    }
+    cxx /= n; cyy /= n; cxy /= n;
+    const theta = 0.5 * Math.atan2(2 * cxy, cxx - cyy);
+    const cosT = Math.cos(theta), sinT = Math.sin(theta);
+
+    let uMin = 1e9, uMax = -1e9, vMin = 1e9, vMax = -1e9;
+    let cr = 0, cg = 0, cb = 0;
+    const us = new Float32Array(n), vs = new Float32Array(n);
+    for (let k = 0; k < n; k++) {
+      const i = px[k];
+      const dx = (i % w) - mx, dy = ((i / w) | 0) - my;
+      const u = dx * cosT + dy * sinT;
+      const v = -dx * sinT + dy * cosT;
+      us[k] = u; vs[k] = v;
+      if (u < uMin) uMin = u; if (u > uMax) uMax = u;
+      if (v < vMin) vMin = v; if (v > vMax) vMax = v;
+      const p = i * 4;
+      cr += data[p]; cg += data[p + 1]; cb += data[p + 2];
+    }
+
+    // โปรไฟล์ความกว้างต่อคอลัมน์ตามแกนหลัก
+    const nCols = Math.max(3, Math.ceil(uMax - uMin) + 1);
+    const colMin = new Float32Array(nCols).fill(1e9);
+    const colMax = new Float32Array(nCols).fill(-1e9);
+    const colCnt = new Uint32Array(nCols);
+    for (let k = 0; k < n; k++) {
+      const c = Math.min(nCols - 1, Math.max(0, Math.round(us[k] - uMin)));
+      colCnt[c]++;
+      if (vs[k] < colMin[c]) colMin[c] = vs[k];
+      if (vs[k] > colMax[c]) colMax[c] = vs[k];
+    }
+    const widths = [];
+    for (let c = 0; c < nCols; c++) {
+      widths.push(colCnt[c] ? colMax[c] - colMin[c] + 1 : 0);
+    }
+
+    // Ø = median ความกว้างช่วงกลางเม็ด (ตัดปลายมน 20% ทั้งสองข้าง)
+    const lo = Math.floor(nCols * 0.2), hi = Math.ceil(nCols * 0.8);
+    const midWidths = widths.slice(lo, hi).filter(v => v > 0);
+
+    return {
+      mx, my, cosT, sinT, uMin, uMax, vMin, vMax,
+      lengthPx: uMax - uMin + 1,
+      diaPx: midWidths.length ? median(midWidths) : (vMax - vMin + 1),
+      widths, nCols,
+      area: n,
+      color: { r: Math.round(cr / n), g: Math.round(cg / n), b: Math.round(cb / n) },
+      touchBorder,
+    };
+  }
+
+  /**
+   * หา "คอคอด" ในโปรไฟล์ความกว้าง — จุดที่ความกว้างยุบลึกกว่า 55% ของ median
+   * คืนตำแหน่งคอลัมน์ที่ควรตัดแยก (เม็ดติดกันแบบหัวต่อหัว)
+   */
+  function findNecks(m, minColsPerPart) {
+    const W = median(m.widths.filter(v => v > 0));
+    if (!W) return [];
+    const sm = m.widths.map((v, i, a) =>
+      (a[i - 1] ?? v) * 0.25 + v * 0.5 + (a[i + 1] ?? v) * 0.25);
+    const necks = [];
+    for (let c = minColsPerPart; c < m.nCols - minColsPerPart; c++) {
+      if (sm[c] < W * 0.55 && sm[c] <= sm[c - 1] && sm[c] <= sm[c + 1]) {
+        if (!necks.length || c - necks[necks.length - 1] >= minColsPerPart) necks.push(c);
+      }
+    }
+    return necks;
+  }
+
   /**
    * วิเคราะห์ภาพ
-   * @param img        HTMLImageElement
-   * @param mmPerPx    มม./พิกเซล (อ้างอิงพิกเซลของภาพต้นฉบับ)
-   * @param opts       {polarity:'auto'|'dark'|'light', minLenMm, maxLenMm}
-   * @returns {pellets, rejected, annotated(canvas), procScale}
+   * @param img      HTMLImageElement
+   * @param mmPerPx  มม./พิกเซลของภาพต้นฉบับ
+   * @param opts     {polarity, minLenMm, maxLenMm, autoSplit}
    */
   function analyze(img, mmPerPx, opts = {}) {
     const { canvas, scale } = toProcCanvas(img);
     const w = canvas.width, h = canvas.height;
     const ctx = canvas.getContext('2d');
     const data = ctx.getImageData(0, 0, w, h).data;
-    const mmpp = mmPerPx * scale; // มม. ต่อพิกเซลของภาพที่ย่อแล้ว
+    const mmpp = mmPerPx * scale;
 
-    // ---- grayscale + histogram ----
-    const gray = new Uint8Array(w * h);
-    const hist = new Uint32Array(256);
+    // ---- grayscale ----
+    let gray = new Uint8Array(w * h);
     for (let i = 0, p = 0; i < gray.length; i++, p += 4) {
-      const g = (data[p] * 0.299 + data[p + 1] * 0.587 + data[p + 2] * 0.114) | 0;
-      gray[i] = g; hist[g]++;
+      gray[i] = (data[p] * 0.299 + data[p + 1] * 0.587 + data[p + 2] * 0.114) | 0;
     }
+
+    // ---- แก้แสงไม่สม่ำเสมอ ----
+    gray = flattenIllumination(gray, w, h);
+
+    const hist = new Uint32Array(256);
+    for (let i = 0; i < gray.length; i++) hist[gray[i]]++;
     const thr = otsu(hist, w * h);
 
-    // ---- เลือกขั้ว: เม็ด = ฝั่งที่มีพิกเซลน้อยกว่า (auto) ----
     let bright = 0;
     for (let t = thr + 1; t < 256; t++) bright += hist[t];
     let fgBright;
-    if (opts.polarity === 'dark') fgBright = true;        // พื้นเข้ม → เม็ดสว่าง
-    else if (opts.polarity === 'light') fgBright = false; // พื้นสว่าง → เม็ดเข้ม
+    if (opts.polarity === 'dark') fgBright = true;
+    else if (opts.polarity === 'light') fgBright = false;
     else fgBright = bright < (w * h - bright);
 
     let mask = new Uint8Array(w * h);
@@ -105,17 +248,18 @@ const Analyzer = (() => {
       mask[i] = (gray[i] > thr) === fgBright ? 1 : 0;
     }
 
-    // ---- morphological open (ลด noise) ----
     mask = erodeDilate(erodeDilate(mask, w, h, 'erode'), w, h, 'dilate');
+    mask = fillHoles(mask, w, h);
 
-    // ---- connected components (flood fill) ----
+    // ---- connected components ----
     const minLenMm = opts.minLenMm ?? 2;
     const maxLenMm = opts.maxLenMm ?? 50;
+    const autoSplit = opts.autoSplit !== false;
     const minAreaPx = Math.max(20, (minLenMm * minLenMm * 0.4) / (mmpp * mmpp));
-    const labels = new Int32Array(w * h); // 0 = ยังไม่ติดป้าย
+    const labels = new Int32Array(w * h);
     const stack = new Int32Array(w * h);
-    const pellets = [], rejectedBoxes = [];
-    let nextLabel = 0, rejectedCount = 0;
+    const accepted = [], rejectedBoxes = [];
+    let nextLabel = 0, rejectedCount = 0, splitCount = 0;
 
     for (let start = 0; start < mask.length; start++) {
       if (!mask[start] || labels[start]) continue;
@@ -123,12 +267,13 @@ const Analyzer = (() => {
       let sp = 0;
       stack[sp++] = start;
       labels[start] = nextLabel;
-      const px = []; // เก็บ index พิกเซลของก้อนนี้
+      const px = [];
+      let touchBorder = false;
       while (sp > 0) {
         const i = stack[--sp];
         px.push(i);
         const x = i % w, y = (i / w) | 0;
-        // 4-connectivity
+        if (x === 0 || y === 0 || x === w - 1 || y === h - 1) touchBorder = true;
         if (x > 0     && mask[i - 1] && !labels[i - 1]) { labels[i - 1] = nextLabel; stack[sp++] = i - 1; }
         if (x < w - 1 && mask[i + 1] && !labels[i + 1]) { labels[i + 1] = nextLabel; stack[sp++] = i + 1; }
         if (y > 0     && mask[i - w] && !labels[i - w]) { labels[i - w] = nextLabel; stack[sp++] = i - w; }
@@ -136,54 +281,49 @@ const Analyzer = (() => {
       }
       if (px.length < minAreaPx) continue;
 
-      // ---- PCA หาแกนหลัก ----
-      let sx = 0, sy = 0;
-      let touchBorder = false;
-      for (const i of px) {
-        const x = i % w, y = (i / w) | 0;
-        sx += x; sy += y;
-        if (x === 0 || y === 0 || x === w - 1 || y === h - 1) touchBorder = true;
+      const m = measureComponent(px, w, data);
+      m.touchBorder = touchBorder;
+
+      // ---- ลองแยกเม็ดติดกัน (เฉพาะก้อนที่ยาวเกินปกติและมีคอคอด) ----
+      const parts = [];
+      if (autoSplit && !touchBorder) {
+        const minColsPerPart = Math.max(4, (minLenMm / mmpp) * 0.8);
+        const necks = findNecks(m, minColsPerPart);
+        if (necks.length >= 1) {
+          // แบ่งพิกเซลตามตำแหน่ง u
+          const groups = Array.from({ length: necks.length + 1 }, () => []);
+          for (const i of px) {
+            const dx = (i % w) - m.mx, dy = ((i / w) | 0) - m.my;
+            const u = dx * m.cosT + dy * m.sinT;
+            const c = Math.round(u - m.uMin);
+            let g = 0;
+            while (g < necks.length && c > necks[g]) g++;
+            groups[g].push(i);
+          }
+          for (const g of groups) {
+            if (g.length >= minAreaPx) parts.push(measureComponent(g, w, data));
+          }
+          if (parts.length >= 2) splitCount += parts.length - 1;
+        }
       }
-      const n = px.length, mx = sx / n, my = sy / n;
-      let cxx = 0, cyy = 0, cxy = 0;
-      for (const i of px) {
-        const dx = (i % w) - mx, dy = ((i / w) | 0) - my;
-        cxx += dx * dx; cyy += dy * dy; cxy += dx * dy;
+      const finals = parts.length >= 2 ? parts : [m];
+
+      for (const f of finals) {
+        let lenMm = f.lengthPx * mmpp;
+        let diaMm = f.diaPx * mmpp;
+        if (lenMm < diaMm) { const t = lenMm; lenMm = diaMm; diaMm = t; }
+        f.lenMm = lenMm; f.diaMm = diaMm;
+        // solidity กรอง noise รูปร่างผิดปกติ
+        const solidity = f.area / (f.lengthPx * Math.max(1, f.diaPx));
+        if (lenMm < minLenMm || solidity < 0.4) continue;
+        if (lenMm > maxLenMm || (finals === parts ? false : touchBorder)) {
+          rejectedCount++; rejectedBoxes.push(f); continue;
+        }
+        accepted.push(f);
       }
-      cxx /= n; cyy /= n; cxy /= n;
-      const theta = 0.5 * Math.atan2(2 * cxy, cxx - cyy);
-      const cosT = Math.cos(theta), sinT = Math.sin(theta);
-
-      // ---- ฉายพิกเซลบนแกนหลัก/แกนรอง + สีเฉลี่ย ----
-      let uMin = 1e9, uMax = -1e9, vMin = 1e9, vMax = -1e9;
-      let cr = 0, cg = 0, cb = 0;
-      for (const i of px) {
-        const dx = (i % w) - mx, dy = ((i / w) | 0) - my;
-        const u = dx * cosT + dy * sinT;
-        const v = -dx * sinT + dy * cosT;
-        if (u < uMin) uMin = u; if (u > uMax) uMax = u;
-        if (v < vMin) vMin = v; if (v > vMax) vMax = v;
-        const p = i * 4;
-        cr += data[p]; cg += data[p + 1]; cb += data[p + 2];
-      }
-      let lenMm = (uMax - uMin + 1) * mmpp;
-      let diaMm = (vMax - vMin + 1) * mmpp;
-      if (lenMm < diaMm) { const t = lenMm; lenMm = diaMm; diaMm = t; }
-
-      const box = {
-        mx, my, cosT, sinT, uMin, uMax, vMin, vMax,
-        lenMm, diaMm,
-        color: { r: Math.round(cr / n), g: Math.round(cg / n), b: Math.round(cb / n) },
-      };
-
-      // กรองก้อนที่เล็ก/ใหญ่ผิดปกติ หรือชนขอบภาพ (อาจวัดไม่ครบ)
-      if (lenMm < minLenMm) continue;
-      if (lenMm > maxLenMm || touchBorder) { rejectedCount++; rejectedBoxes.push(box); continue; }
-
-      pellets.push(box);
     }
 
-    // ---- วาดผลลงภาพ ----
+    // ---- วาดผล ----
     const out = document.createElement('canvas');
     out.width = w; out.height = h;
     const octx = out.getContext('2d');
@@ -195,32 +335,39 @@ const Analyzer = (() => {
       octx.strokeStyle = stroke;
       octx.lineWidth = Math.max(1.5, w / 800);
       octx.strokeRect(b.uMin, b.vMin, b.uMax - b.uMin, b.vMax - b.vMin);
-      // เส้นแกนยาว (สีแดง) เหมือนภาพตัวอย่าง
       octx.strokeStyle = '#ff3b30';
       octx.beginPath();
       octx.moveTo(b.uMin, 0); octx.lineTo(b.uMax, 0);
       octx.stroke();
       octx.restore();
     };
-    pellets.forEach(b => drawBox(b, '#facc15'));
+    accepted.forEach(b => drawBox(b, '#facc15'));
     rejectedBoxes.forEach(b => drawBox(b, 'rgba(255,255,255,.45)'));
-    // ป้ายความยาว
-    octx.font = `${Math.max(10, w / 90)}px sans-serif`;
+    octx.font = `bold ${Math.max(11, w / 85)}px sans-serif`;
     octx.fillStyle = '#4ade80';
+    octx.strokeStyle = 'rgba(0,0,0,.6)';
+    octx.lineWidth = 3;
     octx.textAlign = 'center';
-    pellets.forEach(b => {
-      octx.fillText(b.lenMm.toFixed(1), b.mx, b.my - (Math.abs(b.vMax) + 4));
+    accepted.forEach(b => {
+      const tx = b.mx, ty = b.my - (Math.abs(b.vMax) + 5);
+      octx.strokeText(b.lenMm.toFixed(1), tx, ty);
+      octx.fillText(b.lenMm.toFixed(1), tx, ty);
     });
 
     return {
-      pellets: pellets.map(b => ({ length_mm: +b.lenMm.toFixed(2), diameter_mm: +b.diaMm.toFixed(2), color: b.color })),
+      pellets: accepted.map(b => ({
+        length_mm: +b.lenMm.toFixed(2),
+        diameter_mm: +b.diaMm.toFixed(2),
+        color: b.color,
+      })),
       rejected: rejectedCount,
+      splits: splitCount,
       annotated: out,
       threshold: thr,
     };
   }
 
-  /** สถิติ + การกระจายตามช่วง (binsCm = ขอบช่วงหน่วย ซม. เรียงจากน้อยไปมาก) */
+  /** สถิติ + การกระจายตามช่วง (binsCm หน่วย ซม.) */
   function computeStats(pellets, binsCm) {
     const lens = pellets.map(p => p.length_mm);
     const dias = pellets.map(p => p.diameter_mm);
@@ -247,7 +394,19 @@ const Analyzer = (() => {
       count: b.count, pct: n ? +(b.count * 100 / n).toFixed(1) : 0,
     }));
 
-    // สีเฉลี่ยรวมทุกเม็ด
+    // การกระจาย Ø แบบช่วงอัตโนมัติ 0.5 มม.
+    let diaDist = [];
+    if (n) {
+      const dMin = Math.floor(Math.min(...dias) * 2) / 2;
+      const dMax = Math.ceil(Math.max(...dias) * 2) / 2;
+      for (let v = dMin; v < dMax || diaDist.length === 0; v += 0.5) {
+        const hi = v + 0.5;
+        const count = dias.filter(d => d >= v && d < hi).length;
+        diaDist.push({ label: `${v.toFixed(1)}-${hi.toFixed(1)}`, count, pct: +(count * 100 / n).toFixed(1) });
+        if (diaDist.length > 20) break;
+      }
+    }
+
     let avgColor = null;
     if (n) {
       const r = Math.round(mean(pellets.map(p => p.color.r)));
@@ -265,9 +424,30 @@ const Analyzer = (() => {
       avg_diameter_mm: +avgDia.toFixed(2),
       sd_diameter_mm: +sd(dias, avgDia).toFixed(2),
       distribution,
+      dia_distribution: diaDist,
       avg_color: avgColor,
     };
   }
 
-  return { analyze, computeStats, rgb2lab, deltaE };
+  /** เทียบสเปกไซซ์: คืน {under_pct, insize_pct, over_pct, pass} จากความยาวเม็ด (มม.) */
+  function checkSpec(pellets, spec) {
+    const n = pellets.length;
+    if (!n || !spec) return null;
+    let under = 0, insize = 0, over = 0;
+    for (const p of pellets) {
+      if (p.length_mm < spec.min_mm) under++;
+      else if (p.length_mm <= spec.max_mm) insize++;
+      else over++;
+    }
+    const pct = v => +(v * 100 / n).toFixed(1);
+    const insizePct = pct(insize);
+    return {
+      under_pct: pct(under),
+      insize_pct: insizePct,
+      over_pct: pct(over),
+      pass: insizePct >= spec.target_pct,
+    };
+  }
+
+  return { analyze, computeStats, checkSpec, rgb2lab, deltaE };
 })();

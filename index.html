@@ -11,99 +11,169 @@
 </head>
 <body>
 
+<!-- ============ หน้าล็อกรหัส ============ -->
+<div id="lock-screen" class="lock-screen">
+  <div class="lock-card">
+    <div class="lock-logo">
+      <svg viewBox="0 0 120 120" width="86" height="86">
+        <defs>
+          <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#34d399"/><stop offset="1" stop-color="#0ea5e9"/>
+          </linearGradient>
+        </defs>
+        <circle cx="60" cy="60" r="54" fill="none" stroke="url(#lg)" stroke-width="5" class="lock-ring"/>
+        <g class="lock-pellets">
+          <rect x="32" y="42" width="26" height="11" rx="5" fill="#facc15" transform="rotate(-18 45 47)"/>
+          <rect x="58" y="52" width="30" height="11" rx="5" fill="#fbbf24" transform="rotate(12 73 57)"/>
+          <rect x="40" y="66" width="34" height="11" rx="5" fill="#f59e0b" transform="rotate(-6 57 71)"/>
+        </g>
+      </svg>
+    </div>
+    <h1 data-i18n="lock_title">AICAM Pellet Analyzer</h1>
+    <p data-i18n="lock_sub">กรอกรหัสผ่านเพื่อเข้าใช้งาน</p>
+    <input type="password" id="lock-input" inputmode="numeric" autocomplete="off" data-i18n-ph="lock_placeholder" placeholder="รหัสผ่าน">
+    <label class="lock-remember"><input type="checkbox" id="lock-remember"> <span data-i18n="lock_remember">จดจำเครื่องนี้ 7 วัน</span></label>
+    <button class="btn primary big" id="lock-btn" data-i18n="lock_btn">เข้าใช้งาน</button>
+    <div id="lock-error" class="lock-error"></div>
+    <div id="lock-hint" class="lock-hint" hidden data-i18n="lock_default_hint"></div>
+    <div class="lock-langs">
+      <button class="lang-chip" data-lang="th">ไทย</button>
+      <button class="lang-chip" data-lang="vi">Tiếng Việt</button>
+      <button class="lang-chip" data-lang="en">English</button>
+    </div>
+  </div>
+</div>
+
+<div id="app" hidden>
+
 <header class="topbar">
   <div class="logo">🌾 AICAM <span>Pellet Analyzer</span></div>
-  <div id="net-status" class="net-status" title="สถานะการเชื่อมต่อ">●</div>
+  <div class="topbar-right">
+    <select id="lang-select" class="lang-select" title="Language">
+      <option value="th">ไทย</option>
+      <option value="vi">Việt</option>
+      <option value="en">EN</option>
+    </select>
+    <div id="net-status" class="net-status">●</div>
+  </div>
 </header>
 
 <!-- ============ TAB: วัดขนาด ============ -->
 <main id="tab-measure" class="tab active">
 
-  <section class="card">
-    <h2>1. ถ่ายรูปเม็ดอาหาร</h2>
-    <p class="hint">วางเม็ดอาหารบนพื้นเข้ม ไม่ให้เม็ดติดกัน พร้อมวัตถุอ้างอิงขนาดที่ทราบ (เช่น ไม้บรรทัด/เหรียญ)</p>
+  <section class="card anim-in">
+    <h2 data-i18n="cap_title">1. ถ่ายรูปเม็ดอาหาร</h2>
+    <p class="hint" data-i18n="cap_hint"></p>
     <div class="btn-row">
       <label class="btn primary">
-        📷 ถ่ายรูป
+        <span data-i18n="cap_camera">📷 ถ่ายรูป</span>
         <input type="file" id="input-camera" accept="image/*" capture="environment" hidden>
       </label>
       <label class="btn">
-        🖼 เลือกรูปจากเครื่อง
+        <span data-i18n="cap_file">🖼 เลือกรูปจากเครื่อง</span>
         <input type="file" id="input-file" accept="image/*" hidden>
       </label>
     </div>
   </section>
 
-  <section class="card" id="card-image" hidden>
-    <h2>2. คาลิเบรตมาตราส่วน</h2>
+  <section class="card anim-in" id="card-image" hidden>
+    <h2 data-i18n="cal_title">2. คาลิเบรต & เลือกไซซ์</h2>
     <div class="calib-bar">
-      <span id="calib-status" class="calib-status">ยังไม่ได้คาลิเบรต</span>
-      <button class="btn small" id="btn-calibrate">📏 คาลิเบรต</button>
+      <span id="calib-status" class="calib-status"></span>
+      <button class="btn small" id="btn-calibrate" data-i18n="cal_btn">📏 คาลิเบรต</button>
     </div>
-    <p class="hint" id="calib-hint" hidden>แตะ <b>2 จุด</b> บนภาพ ที่ปลายทั้งสองข้างของวัตถุอ้างอิงที่ทราบความยาว</p>
+    <p class="hint" id="calib-hint" hidden data-i18n="cal_hint"></p>
+    <div class="die-row">
+      <label class="die-label" data-i18n="die_label">ไซซ์อาหาร (Die)</label>
+      <select id="die-select"></select>
+    </div>
     <div class="canvas-wrap">
       <canvas id="canvas-main"></canvas>
     </div>
     <div class="btn-row">
-      <button class="btn primary big" id="btn-analyze">🔬 วิเคราะห์ภาพ</button>
+      <button class="btn primary big" id="btn-analyze" data-i18n="analyze_btn">🔬 วิเคราะห์ภาพ</button>
     </div>
   </section>
 
-  <!-- ผลการวิเคราะห์ -->
-  <section class="card" id="card-results" hidden>
-    <h2>3. ผลการวิเคราะห์</h2>
+  <section class="card anim-in" id="card-results" hidden>
+    <h2 data-i18n="res_title">3. ผลการวิเคราะห์</h2>
 
     <div class="stat-grid">
-      <div class="stat"><div class="stat-num" id="st-count">–</div><div class="stat-label">จำนวนเม็ด</div></div>
-      <div class="stat"><div class="stat-num" id="st-avg-len">–</div><div class="stat-label">ยาวเฉลี่ย (มม.)</div></div>
-      <div class="stat"><div class="stat-num" id="st-avg-dia">–</div><div class="stat-label">Ø เฉลี่ย (มม.)</div></div>
-      <div class="stat"><div class="stat-num" id="st-sd">–</div><div class="stat-label">SD ความยาว</div></div>
-      <div class="stat"><div class="stat-num" id="st-min">–</div><div class="stat-label">สั้นสุด (มม.)</div></div>
-      <div class="stat"><div class="stat-num" id="st-max">–</div><div class="stat-label">ยาวสุด (มม.)</div></div>
+      <div class="stat"><div class="stat-num" id="st-count">–</div><div class="stat-label" data-i18n="st_count"></div></div>
+      <div class="stat"><div class="stat-num" id="st-avg-len">–</div><div class="stat-label" data-i18n="st_avg_len"></div></div>
+      <div class="stat"><div class="stat-num" id="st-avg-dia">–</div><div class="stat-label" data-i18n="st_avg_dia"></div></div>
+      <div class="stat"><div class="stat-num" id="st-sd">–</div><div class="stat-label" data-i18n="st_sd"></div></div>
+      <div class="stat"><div class="stat-num" id="st-min">–</div><div class="stat-label" data-i18n="st_min"></div></div>
+      <div class="stat"><div class="stat-num" id="st-max">–</div><div class="stat-label" data-i18n="st_max"></div></div>
     </div>
 
+    <div id="split-note" class="info-note" hidden></div>
     <div id="rejected-note" class="warn-note" hidden></div>
 
-    <h3>การกระจายความยาว (ซม.)</h3>
+    <!-- เทียบเป้าหมายไซซ์ -->
+    <div id="spec-panel" class="spec-panel" hidden>
+      <div class="spec-head">
+        <h3 data-i18n="spec_title">เทียบเป้าหมายไซซ์</h3>
+        <span id="spec-badge" class="spec-badge"></span>
+      </div>
+      <div class="spec-meta" id="spec-meta"></div>
+      <div class="spec-bar">
+        <div class="spec-seg under" id="seg-under"><span></span></div>
+        <div class="spec-seg insize" id="seg-insize"><span></span></div>
+        <div class="spec-seg over" id="seg-over"><span></span></div>
+      </div>
+      <div class="spec-legend">
+        <div><i class="lg under"></i><span data-i18n="spec_under">Under</span> <b id="lg-under">0%</b></div>
+        <div><i class="lg insize"></i><span data-i18n="spec_insize">Insize</span> <b id="lg-insize">0%</b></div>
+        <div><i class="lg over"></i><span data-i18n="spec_over">Over</span> <b id="lg-over">0%</b></div>
+      </div>
+      <div class="spec-target" id="spec-target"></div>
+    </div>
+
+    <h3 data-i18n="chart_len">การกระจายความยาว (ซม.)</h3>
     <div class="chart-box"><canvas id="chart-bar"></canvas></div>
     <div class="chart-box donut"><canvas id="chart-donut"></canvas></div>
 
-    <h3>ตารางสัดส่วน</h3>
+    <h3 data-i18n="chart_dia">การกระจายเส้นผ่าศูนย์กลาง (มม.)</h3>
+    <div class="chart-box"><canvas id="chart-dia"></canvas></div>
+
+    <h3 data-i18n="dist_title">ตารางสัดส่วน</h3>
     <table class="tbl" id="tbl-dist">
-      <thead><tr><th>ช่วง (ซม.)</th><th>จำนวน</th><th>%</th></tr></thead>
+      <thead><tr><th data-i18n="th_range_cm"></th><th data-i18n="th_count"></th><th data-i18n="th_pct"></th></tr></thead>
       <tbody></tbody>
     </table>
 
-    <h3>สีเฉลี่ยของเม็ดอาหาร</h3>
+    <h3 data-i18n="color_title">สีเฉลี่ยของเม็ดอาหาร</h3>
     <div class="color-row">
       <div class="swatch-box">
         <div class="swatch" id="swatch-avg"></div>
-        <div class="swatch-label">สีตัวอย่าง<br><span id="color-rgb" class="mono">–</span></div>
+        <div class="swatch-label"><span data-i18n="color_sample">สีตัวอย่าง</span><br><span id="color-rgb" class="mono">–</span></div>
       </div>
       <div class="swatch-box" id="ref-color-box" hidden>
         <div class="swatch" id="swatch-ref"></div>
-        <div class="swatch-label">สีอ้างอิง<br><span id="color-de" class="mono">ΔE = –</span></div>
+        <div class="swatch-label"><span data-i18n="color_ref">สีอ้างอิง</span><br><span id="color-de" class="mono">ΔE = –</span></div>
       </div>
       <div id="color-verdict" class="verdict" hidden></div>
     </div>
 
     <details class="pellet-details">
-      <summary>ดูข้อมูลรายเม็ด</summary>
+      <summary data-i18n="pellet_details">ดูข้อมูลรายเม็ด</summary>
       <table class="tbl" id="tbl-pellets">
-        <thead><tr><th>#</th><th>ยาว (มม.)</th><th>Ø (มม.)</th><th>สี</th></tr></thead>
+        <thead><tr><th data-i18n="th_no"></th><th data-i18n="th_len"></th><th data-i18n="th_dia"></th><th data-i18n="th_color"></th></tr></thead>
         <tbody></tbody>
       </table>
     </details>
 
-    <h3>บันทึกผล</h3>
+    <h3 data-i18n="save_title">บันทึกผล</h3>
     <div class="form-grid">
-      <label>ชื่อตัวอย่าง / ล็อต <input type="text" id="f-sample" placeholder="เช่น ล็อต A-2026-06-12"></label>
-      <label>ผู้ตรวจ <input type="text" id="f-operator" placeholder="ชื่อผู้ตรวจ"></label>
-      <label class="full">หมายเหตุ <input type="text" id="f-notes" placeholder="หมายเหตุเพิ่มเติม"></label>
+      <label><span data-i18n="f_sample"></span> <input type="text" id="f-sample" data-i18n-ph="f_sample_ph"></label>
+      <label><span data-i18n="f_operator"></span> <input type="text" id="f-operator" data-i18n-ph="f_operator_ph"></label>
+      <label class="full"><span data-i18n="f_notes"></span> <input type="text" id="f-notes" data-i18n-ph="f_notes_ph"></label>
     </div>
     <div class="btn-row">
-      <button class="btn primary big" id="btn-save">💾 บันทึกขึ้นออนไลน์</button>
-      <button class="btn" id="btn-csv">⬇️ CSV</button>
+      <button class="btn primary big" id="btn-save" data-i18n="save_btn">💾 บันทึกขึ้นออนไลน์</button>
+      <button class="btn" id="btn-share" data-i18n="share_btn">🔗 แชร์</button>
+      <button class="btn" id="btn-csv" data-i18n="csv_btn">⬇️ CSV</button>
     </div>
     <div id="save-status" class="save-status"></div>
   </section>
@@ -111,58 +181,73 @@
 
 <!-- ============ TAB: รายงาน ============ -->
 <main id="tab-reports" class="tab">
-  <section class="card">
-    <h2>📊 รายงานผลการวัด</h2>
-    <p class="hint">ข้อมูลทั้งหมดเก็บออนไลน์ — เปิดดูจากเครื่องไหนก็ได้</p>
+  <section class="card anim-in">
+    <h2 data-i18n="rep_title">📊 รายงานผลการวัด</h2>
+    <p class="hint" data-i18n="rep_hint"></p>
     <div class="btn-row">
-      <button class="btn small" id="btn-refresh">🔄 โหลดใหม่</button>
-      <button class="btn small" id="btn-export-all">⬇️ CSV สรุปทั้งหมด</button>
+      <button class="btn small" id="btn-refresh" data-i18n="rep_refresh">🔄 โหลดใหม่</button>
+      <button class="btn small" id="btn-export-all" data-i18n="rep_export">⬇️ CSV สรุปทั้งหมด</button>
     </div>
-    <div id="report-list" class="report-list">
-      <div class="empty">กำลังโหลด…</div>
-    </div>
+    <div id="report-list" class="report-list"></div>
   </section>
 </main>
 
 <!-- ============ TAB: ตั้งค่า ============ -->
 <main id="tab-settings" class="tab">
-  <section class="card">
-    <h2>⚙️ ตั้งค่า</h2>
+  <section class="card anim-in">
+    <h2 data-i18n="set_title">⚙️ ตั้งค่า</h2>
     <div class="form-grid">
-      <label>มาตราส่วน (มม./พิกเซล)
-        <input type="number" id="s-mmpp" step="0.0001" min="0" placeholder="คาลิเบรตจากภาพ หรือกรอกเอง">
+      <label><span data-i18n="s_mmpp"></span>
+        <input type="number" id="s-mmpp" step="0.0001" min="0" data-i18n-ph="s_mmpp_ph">
       </label>
-      <label>ผู้ตรวจ (ค่าเริ่มต้น)
+      <label><span data-i18n="s_operator"></span>
         <input type="text" id="s-operator">
       </label>
-      <label>ขอบช่วงความยาว (ซม. คั่นด้วย , )
+      <label><span data-i18n="s_bins"></span>
         <input type="text" id="s-bins" placeholder="0.2,0.5,0.8,1.0,1.2,1.5,2.0">
       </label>
-      <label>พื้นหลังภาพ
+      <label><span data-i18n="s_polarity"></span>
         <select id="s-polarity">
-          <option value="auto">ตรวจอัตโนมัติ</option>
-          <option value="dark">พื้นเข้ม เม็ดสว่าง</option>
-          <option value="light">พื้นสว่าง เม็ดเข้ม</option>
+          <option value="auto" data-i18n="s_pol_auto"></option>
+          <option value="dark" data-i18n="s_pol_dark"></option>
+          <option value="light" data-i18n="s_pol_light"></option>
         </select>
       </label>
-      <label>ขนาดเล็กสุดที่นับ (มม.)
+      <label><span data-i18n="s_minlen"></span>
         <input type="number" id="s-minlen" step="0.5" min="0" value="2">
       </label>
-      <label>ขนาดใหญ่สุดที่นับ (มม.)
+      <label><span data-i18n="s_maxlen"></span>
         <input type="number" id="s-maxlen" step="1" min="1" value="50">
       </label>
-      <label>สีอ้างอิง (มาตรฐาน)
-        <input type="color" id="s-refcolor" value="#c8a464">
+      <label class="check-label">
+        <input type="checkbox" id="s-split" checked> <span data-i18n="s_split"></span>
       </label>
       <label class="check-label">
-        <input type="checkbox" id="s-userefcolor"> เปรียบเทียบสีกับสีอ้างอิง
+        <input type="checkbox" id="s-userefcolor"> <span data-i18n="s_userefcolor"></span>
       </label>
-      <label>เกณฑ์สีผ่าน (ΔE ≤)
+      <label><span data-i18n="s_refcolor"></span>
+        <input type="color" id="s-refcolor" value="#c8a464">
+      </label>
+      <label><span data-i18n="s_demax"></span>
         <input type="number" id="s-demax" step="1" min="1" value="10">
       </label>
+      <label><span data-i18n="s_pin"></span>
+        <input type="text" id="s-pin" inputmode="numeric" maxlength="8" placeholder="1234">
+      </label>
     </div>
+
+    <h3 data-i18n="s_spec_title">ตารางเป้าหมายไซซ์อาหาร</h3>
+    <p class="hint" data-i18n="s_spec_hint"></p>
+    <table class="tbl spec-edit" id="tbl-specs">
+      <thead><tr><th data-i18n="th_die"></th><th data-i18n="th_min"></th><th data-i18n="th_max"></th><th data-i18n="th_target"></th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
     <div class="btn-row">
-      <button class="btn primary" id="btn-save-settings">บันทึกการตั้งค่า</button>
+      <button class="btn small" id="btn-add-spec" data-i18n="s_spec_add">+ เพิ่มไซซ์</button>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn primary" id="btn-save-settings" data-i18n="s_save">บันทึกการตั้งค่า</button>
     </div>
     <p class="hint" id="settings-status"></p>
   </section>
@@ -176,12 +261,23 @@
   </div>
 </div>
 
+<!-- Loading overlay -->
+<div id="loading" class="loading" hidden>
+  <div class="spinner"></div>
+  <div id="loading-text"></div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
 <nav class="bottom-nav">
-  <button class="nav-btn active" data-tab="tab-measure">📷<span>วัดขนาด</span></button>
-  <button class="nav-btn" data-tab="tab-reports">📊<span>รายงาน</span></button>
-  <button class="nav-btn" data-tab="tab-settings">⚙️<span>ตั้งค่า</span></button>
+  <button class="nav-btn active" data-tab="tab-measure">📷<span data-i18n="nav_measure">วัดขนาด</span></button>
+  <button class="nav-btn" data-tab="tab-reports">📊<span data-i18n="nav_reports">รายงาน</span></button>
+  <button class="nav-btn" data-tab="tab-settings">⚙️<span data-i18n="nav_settings">ตั้งค่า</span></button>
 </nav>
 
+</div><!-- /#app -->
+
+<script src="js/i18n.js"></script>
 <script src="js/analyzer.js"></script>
 <script src="js/db.js"></script>
 <script src="js/app.js"></script>

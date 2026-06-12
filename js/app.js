@@ -1,34 +1,49 @@
 /* ===========================================================
  * app.js — UI หลักของแอปวัดขนาดเม็ดอาหาร
+ * (ล็อกรหัส · 3 ภาษา · เป้าหมายไซซ์ · แชร์รายงาน)
  * =========================================================== */
 
 (() => {
   const $ = id => document.getElementById(id);
+  const t = (k, v) => I18N.t(k, v);
 
   /* ---------------- state ---------------- */
   const state = {
-    img: null,          // HTMLImageElement ต้นฉบับ
-    procCanvas: null,   // ภาพย่อสำหรับแสดง/คาลิเบรต
-    procScale: 1,       // orig px / proc px
+    img: null,
+    procScale: 1,
     calibrating: false,
     calibPts: [],
-    results: null,      // { pellets, stats, annotated, rejected }
+    results: null,       // { pellets, stats, annotated, rejected, splits, specResult }
+    lastSavedId: null,
     charts: {},
+    appStarted: false,
   };
 
   /* ---------------- settings ---------------- */
+  const DEFAULT_SPECS = [
+    { die: '1.0', min_mm: 1.0, max_mm: 2.0, target_pct: 60 },
+    { die: '1.2', min_mm: 1.5, max_mm: 2.5, target_pct: 60 },
+    { die: '1.4', min_mm: 2.0, max_mm: 3.0, target_pct: 60 },
+    { die: '1.8', min_mm: 2.0, max_mm: 3.0, target_pct: 60 },
+    { die: '2.0', min_mm: 3.0, max_mm: 4.0, target_pct: 60 },
+  ];
   const DEFAULTS = {
     mmpp: 0,
     operator: '',
     bins: '0.2,0.5,0.8,1.0,1.2,1.5,2.0',
     polarity: 'auto',
-    minlen: 2,
+    minlen: 1,
     maxlen: 50,
+    autosplit: true,
     refcolor: '#c8a464',
     userefcolor: false,
     demax: 10,
+    pin: '1234',
+    die: '',
+    specs: DEFAULT_SPECS,
   };
   const settings = { ...DEFAULTS, ...JSON.parse(localStorage.getItem('aicam-settings') || '{}') };
+  if (!Array.isArray(settings.specs) || !settings.specs.length) settings.specs = DEFAULT_SPECS;
 
   function saveSettings() {
     localStorage.setItem('aicam-settings', JSON.stringify(settings));
@@ -36,15 +51,114 @@
   function binsArray() {
     return settings.bins.split(',').map(s => parseFloat(s.trim())).filter(v => !isNaN(v) && v > 0);
   }
+  function currentSpec() {
+    return settings.specs.find(s => String(s.die) === String(settings.die)) || null;
+  }
+
+  /* ---------------- toast ---------------- */
+  let toastTimer = null;
+  function toast(msg) {
+    const el = $('toast');
+    el.textContent = msg;
+    el.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
+  }
+
+  /* ================= LOCK SCREEN ================= */
+  function isUnlocked() {
+    if (sessionStorage.getItem('aicam-unlocked') === '1') return true;
+    const until = +localStorage.getItem('aicam-unlock-until') || 0;
+    return Date.now() < until;
+  }
+
+  function tryUnlock() {
+    const input = $('lock-input');
+    if (input.value === String(settings.pin)) {
+      sessionStorage.setItem('aicam-unlocked', '1');
+      if ($('lock-remember').checked) {
+        localStorage.setItem('aicam-unlock-until', String(Date.now() + 7 * 864e5));
+      }
+      input.value = '';
+      showApp();
+    } else {
+      const err = $('lock-error');
+      err.textContent = t('lock_wrong');
+      err.classList.remove('show');
+      void err.offsetWidth; // restart animation
+      err.classList.add('show');
+      input.value = '';
+      input.focus();
+    }
+  }
+
+  function initLock() {
+    $('lock-hint').hidden = String(settings.pin) !== '1234';
+    $('lock-btn').addEventListener('click', tryUnlock);
+    $('lock-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryUnlock(); });
+    document.querySelectorAll('.lang-chip').forEach(chip => {
+      chip.classList.toggle('active', chip.dataset.lang === I18N.lang);
+      chip.addEventListener('click', () => {
+        I18N.setLang(chip.dataset.lang);
+        document.querySelectorAll('.lang-chip').forEach(c =>
+          c.classList.toggle('active', c.dataset.lang === chip.dataset.lang));
+      });
+    });
+  }
+
+  function showApp() {
+    $('lock-screen').hidden = true;
+    $('app').hidden = false;
+    if (!state.appStarted) {
+      state.appStarted = true;
+      startApp();
+    }
+  }
+
+  /* ================= MAIN APP ================= */
+  function startApp() {
+    initTabs();
+    initCapture();
+    initCalibrate();
+    initAnalyze();
+    initSaveShare();
+    initReports();
+    initSettings();
+    syncSettingsForm();
+    populateDieSelect();
+    updateCalibStatus();
+    checkNet();
+
+    $('lang-select').value = I18N.lang;
+    $('lang-select').addEventListener('change', e => I18N.setLang(e.target.value));
+    document.addEventListener('langchange', onLangChange);
+
+    // deep link: ?report=<id>
+    const rid = new URLSearchParams(location.search).get('report');
+    if (rid) {
+      switchTab('tab-reports');
+      openReport(rid);
+    }
+  }
+
+  function onLangChange() {
+    $('lang-select').value = I18N.lang;
+    updateCalibStatus();
+    populateDieSelect();
+    renderSpecEditor();
+    if (state.results) renderResults(false);
+  }
 
   /* ---------------- tabs ---------------- */
-  document.querySelectorAll('.nav-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b === btn));
-      document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.id === btn.dataset.tab));
-      if (btn.dataset.tab === 'tab-reports') loadReports();
-    });
-  });
+  function switchTab(tabId) {
+    document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
+    document.querySelectorAll('.tab').forEach(tb => tb.classList.toggle('active', tb.id === tabId));
+    if (tabId === 'tab-reports') loadReports();
+  }
+  function initTabs() {
+    document.querySelectorAll('.nav-btn').forEach(btn =>
+      btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
+  }
 
   /* ---------------- โหลดภาพ ---------------- */
   function handleFile(file) {
@@ -54,15 +168,14 @@
     img.onload = () => {
       URL.revokeObjectURL(url);
       state.img = img;
-      // เตรียมภาพย่อสำหรับแสดง
       const c = $('canvas-main');
-      const maxW = 1600;
-      const s = Math.min(1, maxW / Math.max(img.naturalWidth, img.naturalHeight));
+      const s = Math.min(1, 1800 / Math.max(img.naturalWidth, img.naturalHeight));
       c.width = Math.round(img.naturalWidth * s);
       c.height = Math.round(img.naturalHeight * s);
       c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
       state.procScale = img.naturalWidth / c.width;
       state.results = null;
+      state.lastSavedId = null;
       $('card-image').hidden = false;
       $('card-results').hidden = true;
       $('save-status').textContent = '';
@@ -71,36 +184,37 @@
     };
     img.src = url;
   }
-  $('input-camera').addEventListener('change', e => { handleFile(e.target.files[0]); e.target.value = ''; });
-  $('input-file').addEventListener('change', e => { handleFile(e.target.files[0]); e.target.value = ''; });
+  function initCapture() {
+    $('input-camera').addEventListener('change', e => { handleFile(e.target.files[0]); e.target.value = ''; });
+    $('input-file').addEventListener('change', e => { handleFile(e.target.files[0]); e.target.value = ''; });
+  }
 
   /* ---------------- คาลิเบรต ---------------- */
   function updateCalibStatus() {
     const el = $('calib-status');
     if (settings.mmpp > 0) {
-      el.textContent = `มาตราส่วน: ${(+settings.mmpp).toFixed(4)} มม./พิกเซล`;
+      el.textContent = `${t('cal_scale')}: ${(+settings.mmpp).toFixed(4)} ${t('cal_unit')}`;
       el.classList.add('ok');
     } else {
-      el.textContent = 'ยังไม่ได้คาลิเบรต';
+      el.textContent = t('cal_none');
       el.classList.remove('ok');
     }
   }
 
-  $('btn-calibrate').addEventListener('click', () => {
-    if (!state.img) return;
-    state.calibrating = !state.calibrating;
+  function endCalibration() {
+    state.calibrating = false;
     state.calibPts = [];
-    $('calib-hint').hidden = !state.calibrating;
-    $('btn-calibrate').textContent = state.calibrating ? '✕ ยกเลิก' : '📏 คาลิเบรต';
-    document.querySelector('.canvas-wrap').classList.toggle('calibrating', state.calibrating);
-    if (state.calibrating) redrawBase();
-  });
+    $('calib-hint').hidden = true;
+    $('btn-calibrate').textContent = t('cal_btn');
+    document.querySelector('.canvas-wrap').classList.remove('calibrating');
+    updateCalibStatus();
+    if (state.img) redrawBase();
+  }
 
   function redrawBase() {
     const c = $('canvas-main');
     const ctx = c.getContext('2d');
     ctx.drawImage(state.img, 0, 0, c.width, c.height);
-    // วาดจุดคาลิเบรต
     ctx.fillStyle = '#3b82f6';
     ctx.strokeStyle = '#3b82f6';
     ctx.lineWidth = 3;
@@ -115,101 +229,175 @@
     }
   }
 
-  $('canvas-main').addEventListener('click', e => {
-    if (!state.calibrating || !state.img) return;
-    const c = $('canvas-main');
-    const r = c.getBoundingClientRect();
-    const x = (e.clientX - r.left) * c.width / r.width;
-    const y = (e.clientY - r.top) * c.height / r.height;
-    state.calibPts.push({ x, y });
-    redrawBase();
-    if (state.calibPts.length === 2) {
-      const [p1, p2] = state.calibPts;
-      const distProc = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-      setTimeout(() => {
-        const mm = parseFloat(prompt('ความยาวจริงระหว่าง 2 จุด (มม.)', '100'));
-        if (mm > 0 && distProc > 2) {
-          // mm ต่อพิกเซลภาพต้นฉบับ
-          settings.mmpp = +(mm / (distProc * state.procScale)).toFixed(5);
-          saveSettings();
-          syncSettingsForm();
-        }
-        state.calibrating = false;
-        state.calibPts = [];
-        $('calib-hint').hidden = true;
-        $('btn-calibrate').textContent = '📏 คาลิเบรต';
-        document.querySelector('.canvas-wrap').classList.remove('calibrating');
-        updateCalibStatus();
-        redrawBase();
-      }, 60);
-    }
-  });
+  function initCalibrate() {
+    $('btn-calibrate').addEventListener('click', () => {
+      if (!state.img) return;
+      if (state.calibrating) { endCalibration(); return; }
+      state.calibrating = true;
+      state.calibPts = [];
+      $('calib-hint').hidden = false;
+      $('btn-calibrate').textContent = t('cal_cancel');
+      document.querySelector('.canvas-wrap').classList.add('calibrating');
+      redrawBase();
+    });
+
+    $('canvas-main').addEventListener('click', e => {
+      if (!state.calibrating || !state.img) return;
+      const c = $('canvas-main');
+      const r = c.getBoundingClientRect();
+      const x = (e.clientX - r.left) * c.width / r.width;
+      const y = (e.clientY - r.top) * c.height / r.height;
+      state.calibPts.push({ x, y });
+      redrawBase();
+      if (state.calibPts.length === 2) {
+        const [p1, p2] = state.calibPts;
+        const distProc = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+        setTimeout(() => {
+          const mm = parseFloat(prompt(t('cal_prompt'), '100'));
+          if (mm > 0 && distProc > 2) {
+            settings.mmpp = +(mm / (distProc * state.procScale)).toFixed(5);
+            saveSettings();
+            syncSettingsForm();
+          }
+          endCalibration();
+        }, 60);
+      }
+    });
+  }
+
+  /* ---------------- ไซซ์ die ---------------- */
+  function populateDieSelect() {
+    const sel = $('die-select');
+    sel.innerHTML = `<option value="">${t('die_none')}</option>` +
+      settings.specs.map(s =>
+        `<option value="${s.die}">Die ${s.die} — ${s.min_mm}-${s.max_mm} mm (≥${s.target_pct}%)</option>`).join('');
+    sel.value = settings.die || '';
+    sel.onchange = () => {
+      settings.die = sel.value;
+      saveSettings();
+      if (state.results) {
+        state.results.specResult = Analyzer.checkSpec(state.results.pellets, currentSpec());
+        renderSpecPanel();
+      }
+    };
+  }
 
   /* ---------------- วิเคราะห์ ---------------- */
-  $('btn-analyze').addEventListener('click', () => {
-    if (!state.img) return;
-    if (!(settings.mmpp > 0)) {
-      alert('กรุณาคาลิเบรตมาตราส่วนก่อน (กดปุ่ม 📏 คาลิเบรต แล้วแตะ 2 จุดบนวัตถุที่ทราบความยาว)');
-      return;
+  function initAnalyze() {
+    $('btn-analyze').addEventListener('click', () => {
+      if (!state.img) return;
+      if (!(settings.mmpp > 0)) { alert(t('cal_alert')); return; }
+      $('loading-text').textContent = t('analyzing');
+      $('loading').hidden = false;
+      setTimeout(() => {
+        try {
+          const res = Analyzer.analyze(state.img, +settings.mmpp, {
+            polarity: settings.polarity,
+            minLenMm: +settings.minlen,
+            maxLenMm: +settings.maxlen,
+            autoSplit: !!settings.autosplit,
+          });
+          const stats = Analyzer.computeStats(res.pellets, binsArray());
+          const specResult = Analyzer.checkSpec(res.pellets, currentSpec());
+          state.results = { ...res, stats, specResult };
+          state.lastSavedId = null;
+          renderResults(true);
+        } catch (err) {
+          alert(t('analyze_fail') + ': ' + err.message);
+          console.error(err);
+        } finally {
+          $('loading').hidden = true;
+        }
+      }, 60);
+    });
+  }
+
+  /** นับเลขวิ่งขึ้นแบบอนิเมชั่น */
+  function animateNum(el, target, decimals, duration = 700) {
+    const start = performance.now();
+    const from = 0;
+    function frame(now) {
+      const p = Math.min(1, (now - start) / duration);
+      const ease = 1 - Math.pow(1 - p, 3);
+      el.textContent = (from + (target - from) * ease).toFixed(decimals);
+      if (p < 1) requestAnimationFrame(frame);
     }
-    const btn = $('btn-analyze');
-    btn.disabled = true; btn.textContent = '⏳ กำลังวิเคราะห์…';
-    setTimeout(() => {
-      try {
-        const res = Analyzer.analyze(state.img, +settings.mmpp, {
-          polarity: settings.polarity,
-          minLenMm: +settings.minlen,
-          maxLenMm: +settings.maxlen,
-        });
-        const stats = Analyzer.computeStats(res.pellets, binsArray());
-        state.results = { ...res, stats };
-        renderResults();
-      } catch (err) {
-        alert('วิเคราะห์ไม่สำเร็จ: ' + err.message);
-        console.error(err);
-      } finally {
-        btn.disabled = false; btn.textContent = '🔬 วิเคราะห์ภาพ';
-      }
-    }, 30);
-  });
+    requestAnimationFrame(frame);
+  }
 
-  function renderResults() {
-    const { stats, annotated, rejected, pellets } = state.results;
+  function renderResults(animate) {
+    const { stats, annotated, rejected, splits, pellets } = state.results;
 
-    // แสดงภาพ annotated บน canvas หลัก
     const c = $('canvas-main');
     c.width = annotated.width; c.height = annotated.height;
     c.getContext('2d').drawImage(annotated, 0, 0);
 
-    $('st-count').textContent = stats.count;
-    $('st-avg-len').textContent = stats.avg_length_mm.toFixed(1);
-    $('st-avg-dia').textContent = stats.avg_diameter_mm.toFixed(1);
-    $('st-sd').textContent = stats.sd_length_mm.toFixed(1);
-    $('st-min').textContent = stats.min_length_mm.toFixed(1);
-    $('st-max').textContent = stats.max_length_mm.toFixed(1);
+    const set = (id, val, dec) => {
+      if (animate) animateNum($(id), val, dec);
+      else $(id).textContent = val.toFixed(dec);
+    };
+    set('st-count', stats.count, 0);
+    set('st-avg-len', stats.avg_length_mm, 1);
+    set('st-avg-dia', stats.avg_diameter_mm, 2);
+    set('st-sd', stats.sd_length_mm, 1);
+    set('st-min', stats.min_length_mm, 1);
+    set('st-max', stats.max_length_mm, 1);
 
+    const sp = $('split-note');
+    if (splits > 0) { sp.hidden = false; sp.textContent = '✂️ ' + t('split_note', { n: splits }); }
+    else sp.hidden = true;
     const rj = $('rejected-note');
-    if (rejected > 0) {
-      rj.hidden = false;
-      rj.textContent = `⚠️ มี ${rejected} ก้อนที่ไม่ถูกนับ (ใหญ่ผิดปกติ/เม็ดติดกัน/ชนขอบภาพ) — แสดงเป็นกรอบสีขาวจาง`;
-    } else rj.hidden = true;
+    if (rejected > 0) { rj.hidden = false; rj.textContent = '⚠️ ' + t('rejected_note', { n: rejected }); }
+    else rj.hidden = true;
 
+    renderSpecPanel();
     renderCharts('chart-bar', 'chart-donut', stats, state.charts);
+    renderDiaChart('chart-dia', stats, state.charts);
     renderDistTable($('tbl-dist').querySelector('tbody'), stats.distribution);
     renderColor(stats);
     renderPelletTable(pellets);
 
     if (settings.operator && !$('f-operator').value) $('f-operator').value = settings.operator;
     $('card-results').hidden = false;
-    $('card-results').scrollIntoView({ behavior: 'smooth' });
+    if (animate) $('card-results').scrollIntoView({ behavior: 'smooth' });
+  }
+
+  /* ---------------- spec panel ---------------- */
+  function renderSpecPanel() {
+    const panel = $('spec-panel');
+    const spec = currentSpec();
+    const sr = state.results ? state.results.specResult : null;
+    if (!spec || !sr) { panel.hidden = true; return; }
+    panel.hidden = false;
+
+    const badge = $('spec-badge');
+    badge.className = 'spec-badge ' + (sr.pass ? 'pass' : 'fail');
+    badge.textContent = sr.pass ? t('spec_pass') : t('spec_fail');
+
+    $('spec-meta').textContent =
+      `${t('spec_die_dia', { d: spec.die })} · ${t('spec_range', { min: spec.min_mm, max: spec.max_mm })}`;
+    $('spec-target').textContent = '🎯 ' + t('spec_target', { t: spec.target_pct });
+
+    const segs = [
+      ['seg-under', 'lg-under', sr.under_pct],
+      ['seg-insize', 'lg-insize', sr.insize_pct],
+      ['seg-over', 'lg-over', sr.over_pct],
+    ];
+    for (const [segId, lgId, pct] of segs) {
+      const seg = $(segId);
+      seg.querySelector('span').textContent = pct >= 8 ? pct + '%' : '';
+      requestAnimationFrame(() => { seg.style.width = pct + '%'; });
+      $(lgId).textContent = pct + '%';
+    }
   }
 
   /* ---------------- charts ---------------- */
+  const PALETTE = ['#86efac', '#34d399', '#3b82f6', '#6366f1', '#a855f7', '#ca8a04', '#f43f5e', '#94a3b8'];
+
   function renderCharts(barId, donutId, stats, store) {
     const labels = stats.distribution.map(d => d.label);
     const counts = stats.distribution.map(d => d.count);
-    const palette = ['#86efac', '#34d399', '#3b82f6', '#6366f1', '#a855f7', '#ca8a04', '#f43f5e', '#94a3b8'];
-    const colors = labels.map((_, i) => palette[i % palette.length]);
+    const colors = labels.map((_, i) => PALETTE[i % PALETTE.length]);
 
     if (store[barId]) store[barId].destroy();
     store[barId] = new Chart($(barId), {
@@ -217,7 +405,7 @@
       data: { labels, datasets: [{ data: counts, backgroundColor: colors, borderRadius: 4 }] },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, title: { display: true, text: 'จำนวนเม็ดตามช่วงความยาว (ซม.)' } },
+        plugins: { legend: { display: false }, title: { display: true, text: t('chart_len_title') } },
         scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
       },
     });
@@ -226,15 +414,32 @@
     store[donutId] = new Chart($(donutId), {
       type: 'doughnut',
       data: {
-        labels: labels.map((l, i) => `${l} ซม. (${stats.distribution[i].pct}%)`),
+        labels: labels.map((l, i) => `${l} (${stats.distribution[i].pct}%)`),
         datasets: [{ data: counts, backgroundColor: colors }],
       },
       options: {
         responsive: true, maintainAspectRatio: false,
         plugins: {
           legend: { position: 'right', labels: { boxWidth: 14, font: { size: 11 } } },
-          title: { display: true, text: `รวมทั้งหมด ${stats.count} เม็ด` },
+          title: { display: true, text: t('chart_total', { n: stats.count }) },
         },
+      },
+    });
+  }
+
+  function renderDiaChart(id, stats, store) {
+    const dd = stats.dia_distribution || [];
+    if (store[id]) store[id].destroy();
+    store[id] = new Chart($(id), {
+      type: 'bar',
+      data: {
+        labels: dd.map(d => d.label),
+        datasets: [{ data: dd.map(d => d.count), backgroundColor: '#0ea5e9', borderRadius: 4 }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, title: { display: true, text: t('chart_dia_title') } },
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
       },
     });
   }
@@ -265,7 +470,7 @@
       verdict.hidden = false;
       const pass = de <= +settings.demax;
       verdict.className = 'verdict ' + (pass ? 'pass' : 'fail');
-      verdict.textContent = pass ? '✓ สีผ่านเกณฑ์' : '✗ สีไม่ผ่านเกณฑ์';
+      verdict.textContent = pass ? t('color_pass') : t('color_fail');
     } else {
       refBox.hidden = true; verdict.hidden = true;
     }
@@ -273,47 +478,98 @@
 
   function renderPelletTable(pellets) {
     $('tbl-pellets').querySelector('tbody').innerHTML = pellets.map((p, i) =>
-      `<tr><td>${i + 1}</td><td>${p.length_mm.toFixed(1)}</td><td>${p.diameter_mm.toFixed(1)}</td>
+      `<tr><td>${i + 1}</td><td>${p.length_mm.toFixed(1)}</td><td>${p.diameter_mm.toFixed(2)}</td>
        <td><span class="dot" style="background:rgb(${p.color.r},${p.color.g},${p.color.b})"></span></td></tr>`
     ).join('');
   }
 
-  /* ---------------- บันทึกขึ้นออนไลน์ ---------------- */
-  $('btn-save').addEventListener('click', async () => {
-    if (!state.results) return;
-    const btn = $('btn-save'), st = $('save-status');
-    btn.disabled = true;
-    st.className = 'save-status'; st.textContent = '⏳ กำลังบันทึก…';
-    try {
-      const blob = await new Promise(r => state.results.annotated.toBlob(r, 'image/jpeg', 0.85));
-      const s = state.results.stats;
-      if ($('f-operator').value) { settings.operator = $('f-operator').value; saveSettings(); }
-      await DB.saveSession({
-        sample_name: $('f-sample').value || null,
-        operator: $('f-operator').value || null,
-        notes: $('f-notes').value || null,
-        pellet_count: s.count,
-        avg_length_mm: s.avg_length_mm,
-        sd_length_mm: s.sd_length_mm,
-        min_length_mm: s.min_length_mm,
-        max_length_mm: s.max_length_mm,
-        avg_diameter_mm: s.avg_diameter_mm,
-        sd_diameter_mm: s.sd_diameter_mm,
-        distribution: s.distribution,
-        avg_color: s.avg_color,
-        mm_per_px: +settings.mmpp,
-        pellets: state.results.pellets,
-      }, blob);
-      st.className = 'save-status ok';
-      st.textContent = '✓ บันทึกเรียบร้อย — ดูได้ในแท็บ "รายงาน"';
-    } catch (err) {
-      st.className = 'save-status err';
-      st.textContent = '✗ บันทึกไม่สำเร็จ: ' + (err.message || err);
-      console.error(err);
-    } finally {
-      btn.disabled = false;
+  /* ---------------- บันทึก / แชร์ ---------------- */
+  function reportUrl(id) {
+    return location.origin + location.pathname + '?report=' + id;
+  }
+
+  async function shareReport(id, name, count, avgLen) {
+    const text = t('share_text', { name: name || '', n: count, len: avgLen });
+    const url = reportUrl(id);
+    if (navigator.share) {
+      try { await navigator.share({ title: 'AICAM', text, url }); return; } catch (e) { /* user cancelled */ }
     }
-  });
+    try {
+      await navigator.clipboard.writeText(url);
+      toast(t('link_copied'));
+    } catch {
+      prompt('URL', url);
+    }
+  }
+
+  function initSaveShare() {
+    $('btn-save').addEventListener('click', async () => {
+      if (!state.results) return;
+      const btn = $('btn-save'), st = $('save-status');
+      btn.disabled = true;
+      st.className = 'save-status'; st.textContent = t('saving');
+      try {
+        const blob = await new Promise(r => state.results.annotated.toBlob(r, 'image/jpeg', 0.85));
+        const s = state.results.stats;
+        const sr = state.results.specResult;
+        const spec = currentSpec();
+        if ($('f-operator').value) { settings.operator = $('f-operator').value; saveSettings(); }
+        const saved = await DB.saveSession({
+          sample_name: $('f-sample').value || null,
+          operator: $('f-operator').value || null,
+          notes: $('f-notes').value || null,
+          pellet_count: s.count,
+          avg_length_mm: s.avg_length_mm,
+          sd_length_mm: s.sd_length_mm,
+          min_length_mm: s.min_length_mm,
+          max_length_mm: s.max_length_mm,
+          avg_diameter_mm: s.avg_diameter_mm,
+          sd_diameter_mm: s.sd_diameter_mm,
+          distribution: s.distribution,
+          avg_color: s.avg_color,
+          mm_per_px: +settings.mmpp,
+          pellets: state.results.pellets,
+          die_size: spec ? String(spec.die) : null,
+          spec: spec || null,
+          under_pct: sr ? sr.under_pct : null,
+          insize_pct: sr ? sr.insize_pct : null,
+          over_pct: sr ? sr.over_pct : null,
+          spec_pass: sr ? sr.pass : null,
+        }, blob);
+        state.lastSavedId = saved.id;
+        st.className = 'save-status ok';
+        st.textContent = t('save_ok');
+      } catch (err) {
+        st.className = 'save-status err';
+        st.textContent = t('save_err') + ': ' + (err.message || err);
+        console.error(err);
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    $('btn-share').addEventListener('click', () => {
+      if (!state.results) return;
+      if (!state.lastSavedId) { toast(t('share_first')); return; }
+      const s = state.results.stats;
+      shareReport(state.lastSavedId, $('f-sample').value, s.count, s.avg_length_mm.toFixed(1));
+    });
+
+    $('btn-csv').addEventListener('click', () => {
+      if (!state.results) return;
+      const s = {
+        ...state.results.stats,
+        pellet_count: state.results.stats.count,
+        sample_name: $('f-sample').value, operator: $('f-operator').value, notes: $('f-notes').value,
+        die_size: settings.die || null,
+        under_pct: state.results.specResult?.under_pct,
+        insize_pct: state.results.specResult?.insize_pct,
+        over_pct: state.results.specResult?.over_pct,
+        spec_pass: state.results.specResult?.pass,
+      };
+      downloadCsv(`pellet-${Date.now()}.csv`, sessionCsvRows(s, state.results.pellets));
+    });
+  }
 
   /* ---------------- CSV ---------------- */
   function downloadCsv(name, rows) {
@@ -327,128 +583,178 @@
 
   function sessionCsvRows(s, pellets) {
     const rows = [
-      ['รายงานการวัดขนาดเม็ดอาหาร'],
-      ['วันที่', s.created_at ? new Date(s.created_at).toLocaleString('th-TH') : new Date().toLocaleString('th-TH')],
-      ['ตัวอย่าง', s.sample_name || ''], ['ผู้ตรวจ', s.operator || ''], ['หมายเหตุ', s.notes || ''],
+      [t('csv_report_title')],
+      [t('csv_date'), s.created_at ? new Date(s.created_at).toLocaleString() : new Date().toLocaleString()],
+      [t('csv_sample'), s.sample_name || ''], [t('csv_operator'), s.operator || ''], [t('csv_notes'), s.notes || ''],
       [],
-      ['จำนวนเม็ด', s.pellet_count],
-      ['ความยาวเฉลี่ย (มม.)', s.avg_length_mm], ['SD ความยาว', s.sd_length_mm],
-      ['สั้นสุด (มม.)', s.min_length_mm], ['ยาวสุด (มม.)', s.max_length_mm],
-      ['เส้นผ่าศูนย์กลางเฉลี่ย (มม.)', s.avg_diameter_mm],
-      [],
-      ['ช่วง (ซม.)', 'จำนวน', '%'],
+      [t('csv_count'), s.pellet_count],
+      [t('csv_avg_len'), s.avg_length_mm], [t('csv_sd'), s.sd_length_mm],
+      [t('csv_min'), s.min_length_mm], [t('csv_max'), s.max_length_mm],
+      [t('csv_avg_dia'), s.avg_diameter_mm],
+    ];
+    if (s.die_size != null && s.insize_pct != null) {
+      rows.push([],
+        [t('csv_die'), s.die_size],
+        [t('csv_under'), s.under_pct], [t('csv_insize'), s.insize_pct], [t('csv_over'), s.over_pct],
+        [t('csv_result'), s.spec_pass ? t('csv_pass') : t('csv_fail')]);
+    }
+    rows.push([],
+      [t('th_range_cm'), t('th_count'), t('th_pct')],
       ...(s.distribution || []).map(d => [d.label, d.count, d.pct]),
       [],
-      ['#', 'ความยาว (มม.)', 'เส้นผ่าศูนย์กลาง (มม.)', 'R', 'G', 'B'],
-      ...(pellets || []).map((p, i) => [i + 1, p.length_mm, p.diameter_mm, p.color?.r, p.color?.g, p.color?.b]),
-    ];
+      [t('th_no'), t('th_len'), t('th_dia'), 'R', 'G', 'B'],
+      ...(pellets || []).map((p, i) => [i + 1, p.length_mm, p.diameter_mm, p.color?.r, p.color?.g, p.color?.b]));
     return rows;
   }
 
-  $('btn-csv').addEventListener('click', () => {
-    if (!state.results) return;
-    const s = {
-      ...state.results.stats,
-      pellet_count: state.results.stats.count,
-      sample_name: $('f-sample').value, operator: $('f-operator').value, notes: $('f-notes').value,
-    };
-    downloadCsv(`pellet-${Date.now()}.csv`, sessionCsvRows(s, state.results.pellets));
-  });
-
-  /* ---------------- รายงาน (ออนไลน์) ---------------- */
+  /* ---------------- รายงาน ---------------- */
   async function loadReports() {
     const list = $('report-list');
-    list.innerHTML = '<div class="empty">กำลังโหลด…</div>';
+    list.innerHTML = `<div class="empty">${t('rep_loading')}</div>`;
     try {
       const rows = await DB.listSessions();
       if (!rows.length) {
-        list.innerHTML = '<div class="empty">ยังไม่มีข้อมูล — วัดและบันทึกผลจากแท็บ "วัดขนาด"</div>';
+        list.innerHTML = `<div class="empty">🌾<br>${t('rep_empty')}</div>`;
         return;
       }
       list.innerHTML = '';
-      rows.forEach(r => {
+      rows.forEach((r, idx) => {
         const div = document.createElement('div');
         div.className = 'report-item';
-        const d = new Date(r.created_at).toLocaleString('th-TH', { dateStyle: 'medium', timeStyle: 'short' });
+        div.style.animationDelay = Math.min(idx * 0.04, 0.4) + 's';
+        const d = new Date(r.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+        const passChip = r.spec_pass == null ? '' :
+          `<span class="report-pass ${r.spec_pass ? 'pass' : 'fail'}">${r.spec_pass ? '✓' : '✗'} ${r.insize_pct ?? ''}%</span>`;
         div.innerHTML = `
           ${r.image_url ? `<img class="report-thumb" src="${r.image_url}" loading="lazy">` : '<div class="report-thumb"></div>'}
           <div class="report-info">
-            <div class="report-title">${r.sample_name || 'ไม่ระบุชื่อตัวอย่าง'}</div>
+            <div class="report-title">${r.sample_name || t('rep_noname')}${r.die_size ? ` · Die ${r.die_size}` : ''}</div>
             <div class="report-sub">${d}${r.operator ? ' · ' + r.operator : ''}</div>
-            <div class="report-stats">${r.pellet_count} เม็ด · ยาวเฉลี่ย ${(+r.avg_length_mm).toFixed(1)} มม. · Ø ${(+r.avg_diameter_mm).toFixed(1)} มม.</div>
-          </div>`;
+            <div class="report-stats">${r.pellet_count} ${t('rep_items')} · ${t('rep_avg')} ${(+r.avg_length_mm).toFixed(1)} mm · Ø ${(+r.avg_diameter_mm).toFixed(2)} mm</div>
+          </div>
+          ${passChip}`;
         div.addEventListener('click', () => openReport(r.id));
         list.appendChild(div);
       });
     } catch (err) {
-      list.innerHTML = `<div class="empty">โหลดไม่สำเร็จ: ${err.message || err}</div>`;
+      list.innerHTML = `<div class="empty">${t('rep_load_fail')}: ${err.message || err}</div>`;
     }
   }
-  $('btn-refresh').addEventListener('click', loadReports);
 
-  $('btn-export-all').addEventListener('click', async () => {
-    try {
-      const rows = await DB.listSessions(1000);
-      downloadCsv('pellet-summary.csv', [
-        ['วันที่', 'ตัวอย่าง', 'ผู้ตรวจ', 'จำนวนเม็ด', 'ยาวเฉลี่ย (มม.)', 'Ø เฉลี่ย (มม.)'],
-        ...rows.map(r => [new Date(r.created_at).toLocaleString('th-TH'), r.sample_name, r.operator,
-          r.pellet_count, r.avg_length_mm, r.avg_diameter_mm]),
-      ]);
-    } catch (err) { alert('ส่งออกไม่สำเร็จ: ' + (err.message || err)); }
-  });
+  function initReports() {
+    $('btn-refresh').addEventListener('click', loadReports);
+    $('btn-export-all').addEventListener('click', async () => {
+      try {
+        const rows = await DB.listSessions(1000);
+        downloadCsv('pellet-summary.csv', [
+          [t('csv_date'), t('csv_sample'), t('csv_operator'), t('csv_count'),
+           t('csv_avg_len'), t('csv_avg_dia'), t('csv_die'), t('csv_insize'), t('csv_result')],
+          ...rows.map(r => [new Date(r.created_at).toLocaleString(), r.sample_name, r.operator,
+            r.pellet_count, r.avg_length_mm, r.avg_diameter_mm, r.die_size ?? '',
+            r.insize_pct ?? '', r.spec_pass == null ? '' : (r.spec_pass ? t('csv_pass') : t('csv_fail'))]),
+        ]);
+      } catch (err) { alert(t('export_fail') + ': ' + (err.message || err)); }
+    });
+    $('modal-close').addEventListener('click', () => { $('modal').hidden = true; });
+    $('modal').addEventListener('click', e => { if (e.target === $('modal')) $('modal').hidden = true; });
+  }
 
   async function openReport(id) {
     const modal = $('modal'), content = $('modal-content');
     modal.hidden = false;
-    content.innerHTML = '<div class="empty">กำลังโหลด…</div>';
+    content.innerHTML = `<div class="empty">${t('rep_loading')}</div>`;
     try {
       const s = await DB.getSession(id);
-      const d = new Date(s.created_at).toLocaleString('th-TH', { dateStyle: 'full', timeStyle: 'short' });
+      const d = new Date(s.created_at).toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'short' });
       const ac = s.avg_color;
+      const specHtml = (s.insize_pct == null) ? '' : `
+        <div class="spec-panel">
+          <div class="spec-head">
+            <h3>${t('spec_title')}${s.die_size ? ` — Die ${s.die_size}` : ''}</h3>
+            <span class="spec-badge ${s.spec_pass ? 'pass' : 'fail'}">${s.spec_pass ? t('spec_pass') : t('spec_fail')}</span>
+          </div>
+          ${s.spec ? `<div class="spec-meta">${t('spec_range', { min: s.spec.min_mm, max: s.spec.max_mm })} · ${t('spec_target', { t: s.spec.target_pct })}</div>` : ''}
+          <div class="spec-bar">
+            <div class="spec-seg under" style="width:${s.under_pct}%"><span>${s.under_pct >= 8 ? s.under_pct + '%' : ''}</span></div>
+            <div class="spec-seg insize" style="width:${s.insize_pct}%"><span>${s.insize_pct >= 8 ? s.insize_pct + '%' : ''}</span></div>
+            <div class="spec-seg over" style="width:${s.over_pct}%"><span>${s.over_pct >= 8 ? s.over_pct + '%' : ''}</span></div>
+          </div>
+          <div class="spec-legend">
+            <div><i class="lg under"></i>${t('spec_under')} <b>${s.under_pct}%</b></div>
+            <div><i class="lg insize"></i>${t('spec_insize')} <b>${s.insize_pct}%</b></div>
+            <div><i class="lg over"></i>${t('spec_over')} <b>${s.over_pct}%</b></div>
+          </div>
+        </div>`;
       content.innerHTML = `
-        <h2>${s.sample_name || 'ไม่ระบุชื่อตัวอย่าง'}</h2>
-        <p class="hint">${d}${s.operator ? ' · ผู้ตรวจ: ' + s.operator : ''}${s.notes ? '<br>หมายเหตุ: ' + s.notes : ''}</p>
+        <h2>${s.sample_name || t('rep_noname')}</h2>
+        <p class="hint">${d}${s.operator ? ` · ${t('rep_inspector')}: ${s.operator}` : ''}${s.notes ? `<br>${t('rep_note')}: ${s.notes}` : ''}</p>
         ${s.image_url ? `<img class="modal-img" src="${s.image_url}">` : ''}
         <div class="stat-grid">
-          <div class="stat"><div class="stat-num">${s.pellet_count}</div><div class="stat-label">จำนวนเม็ด</div></div>
-          <div class="stat"><div class="stat-num">${(+s.avg_length_mm).toFixed(1)}</div><div class="stat-label">ยาวเฉลี่ย (มม.)</div></div>
-          <div class="stat"><div class="stat-num">${(+s.avg_diameter_mm).toFixed(1)}</div><div class="stat-label">Ø เฉลี่ย (มม.)</div></div>
-          <div class="stat"><div class="stat-num">${(+s.sd_length_mm).toFixed(1)}</div><div class="stat-label">SD ความยาว</div></div>
-          <div class="stat"><div class="stat-num">${(+s.min_length_mm).toFixed(1)}</div><div class="stat-label">สั้นสุด (มม.)</div></div>
-          <div class="stat"><div class="stat-num">${(+s.max_length_mm).toFixed(1)}</div><div class="stat-label">ยาวสุด (มม.)</div></div>
+          <div class="stat"><div class="stat-num">${s.pellet_count}</div><div class="stat-label">${t('st_count')}</div></div>
+          <div class="stat"><div class="stat-num">${(+s.avg_length_mm).toFixed(1)}</div><div class="stat-label">${t('st_avg_len')}</div></div>
+          <div class="stat"><div class="stat-num">${(+s.avg_diameter_mm).toFixed(2)}</div><div class="stat-label">${t('st_avg_dia')}</div></div>
+          <div class="stat"><div class="stat-num">${(+s.sd_length_mm).toFixed(1)}</div><div class="stat-label">${t('st_sd')}</div></div>
+          <div class="stat"><div class="stat-num">${(+s.min_length_mm).toFixed(1)}</div><div class="stat-label">${t('st_min')}</div></div>
+          <div class="stat"><div class="stat-num">${(+s.max_length_mm).toFixed(1)}</div><div class="stat-label">${t('st_max')}</div></div>
         </div>
+        ${specHtml}
         <div class="chart-box"><canvas id="m-chart-bar"></canvas></div>
         <div class="chart-box donut"><canvas id="m-chart-donut"></canvas></div>
-        <h3>ตารางสัดส่วน</h3>
-        <table class="tbl"><thead><tr><th>ช่วง (ซม.)</th><th>จำนวน</th><th>%</th></tr></thead>
+        <h3>${t('dist_title')}</h3>
+        <table class="tbl"><thead><tr><th>${t('th_range_cm')}</th><th>${t('th_count')}</th><th>${t('th_pct')}</th></tr></thead>
         <tbody id="m-dist"></tbody></table>
-        ${ac ? `<h3>สีเฉลี่ย</h3>
+        ${ac ? `<h3>${t('color_title')}</h3>
           <div class="color-row"><div class="swatch-box">
             <div class="swatch" style="background:rgb(${ac.r},${ac.g},${ac.b})"></div>
             <div class="swatch-label">RGB(${ac.r}, ${ac.g}, ${ac.b})${ac.delta_e != null ? `<br>ΔE = ${ac.delta_e}` : ''}</div>
           </div></div>` : ''}
         <div class="btn-row">
-          <button class="btn" id="m-csv">⬇️ CSV</button>
-          <button class="btn" id="m-del" style="color:var(--danger)">🗑 ลบรายงานนี้</button>
+          <button class="btn" id="m-share">${t('share_btn')}</button>
+          <button class="btn" id="m-csv">${t('csv_btn')}</button>
+          <button class="btn" id="m-del" style="color:var(--danger)">${t('rep_delete')}</button>
         </div>`;
       renderDistTable($('m-dist'), s.distribution || []);
       renderCharts('m-chart-bar', 'm-chart-donut',
         { distribution: s.distribution || [], count: s.pellet_count }, state.charts);
+      $('m-share').addEventListener('click', () =>
+        shareReport(id, s.sample_name, s.pellet_count, (+s.avg_length_mm).toFixed(1)));
       $('m-csv').addEventListener('click', () => downloadCsv(`pellet-${id.slice(0, 8)}.csv`, sessionCsvRows(s, s.pellets)));
       $('m-del').addEventListener('click', async () => {
-        if (!confirm('ลบรายงานนี้ถาวร?')) return;
+        if (!confirm(t('rep_delete_confirm'))) return;
         await DB.deleteSession(id, s.image_url);
         modal.hidden = true;
         loadReports();
       });
     } catch (err) {
-      content.innerHTML = `<div class="empty">โหลดไม่สำเร็จ: ${err.message || err}</div>`;
+      content.innerHTML = `<div class="empty">${t('rep_load_fail')}: ${err.message || err}</div>`;
     }
   }
-  $('modal-close').addEventListener('click', () => { $('modal').hidden = true; });
-  $('modal').addEventListener('click', e => { if (e.target === $('modal')) $('modal').hidden = true; });
 
   /* ---------------- ตั้งค่า ---------------- */
+  function renderSpecEditor() {
+    const tbody = $('tbl-specs').querySelector('tbody');
+    tbody.innerHTML = settings.specs.map((s, i) => `
+      <tr>
+        <td><input data-spec="${i}" data-f="die" value="${s.die}"></td>
+        <td><input data-spec="${i}" data-f="min_mm" type="number" step="0.1" value="${s.min_mm}"></td>
+        <td><input data-spec="${i}" data-f="max_mm" type="number" step="0.1" value="${s.max_mm}"></td>
+        <td><input data-spec="${i}" data-f="target_pct" type="number" step="5" value="${s.target_pct}"></td>
+        <td><button class="spec-del" data-del="${i}">🗑</button></td>
+      </tr>`).join('');
+    tbody.querySelectorAll('input').forEach(inp => {
+      inp.addEventListener('change', () => {
+        const i = +inp.dataset.spec, f = inp.dataset.f;
+        settings.specs[i][f] = f === 'die' ? inp.value : parseFloat(inp.value) || 0;
+      });
+    });
+    tbody.querySelectorAll('.spec-del').forEach(btn => {
+      btn.addEventListener('click', () => {
+        settings.specs.splice(+btn.dataset.del, 1);
+        renderSpecEditor();
+      });
+    });
+  }
+
   function syncSettingsForm() {
     $('s-mmpp').value = settings.mmpp || '';
     $('s-operator').value = settings.operator;
@@ -456,26 +762,41 @@
     $('s-polarity').value = settings.polarity;
     $('s-minlen').value = settings.minlen;
     $('s-maxlen').value = settings.maxlen;
+    $('s-split').checked = !!settings.autosplit;
     $('s-refcolor').value = settings.refcolor;
     $('s-userefcolor').checked = settings.userefcolor;
     $('s-demax').value = settings.demax;
+    $('s-pin').value = settings.pin;
+    renderSpecEditor();
   }
 
-  $('btn-save-settings').addEventListener('click', () => {
-    settings.mmpp = parseFloat($('s-mmpp').value) || 0;
-    settings.operator = $('s-operator').value;
-    settings.bins = $('s-bins').value || DEFAULTS.bins;
-    settings.polarity = $('s-polarity').value;
-    settings.minlen = parseFloat($('s-minlen').value) || DEFAULTS.minlen;
-    settings.maxlen = parseFloat($('s-maxlen').value) || DEFAULTS.maxlen;
-    settings.refcolor = $('s-refcolor').value;
-    settings.userefcolor = $('s-userefcolor').checked;
-    settings.demax = parseFloat($('s-demax').value) || DEFAULTS.demax;
-    saveSettings();
-    updateCalibStatus();
-    $('settings-status').textContent = '✓ บันทึกการตั้งค่าแล้ว';
-    setTimeout(() => { $('settings-status').textContent = ''; }, 2500);
-  });
+  function initSettings() {
+    $('btn-add-spec').addEventListener('click', () => {
+      settings.specs.push({ die: '', min_mm: 0, max_mm: 0, target_pct: 60 });
+      renderSpecEditor();
+    });
+    $('btn-save-settings').addEventListener('click', () => {
+      settings.mmpp = parseFloat($('s-mmpp').value) || 0;
+      settings.operator = $('s-operator').value;
+      settings.bins = $('s-bins').value || DEFAULTS.bins;
+      settings.polarity = $('s-polarity').value;
+      settings.minlen = parseFloat($('s-minlen').value) || DEFAULTS.minlen;
+      settings.maxlen = parseFloat($('s-maxlen').value) || DEFAULTS.maxlen;
+      settings.autosplit = $('s-split').checked;
+      settings.refcolor = $('s-refcolor').value;
+      settings.userefcolor = $('s-userefcolor').checked;
+      settings.demax = parseFloat($('s-demax').value) || DEFAULTS.demax;
+      const pin = $('s-pin').value.trim();
+      if (/^\d{4,8}$/.test(pin)) settings.pin = pin;
+      settings.specs = settings.specs.filter(s => s.die !== '' && s.max_mm > 0);
+      saveSettings();
+      updateCalibStatus();
+      populateDieSelect();
+      renderSpecEditor();
+      $('settings-status').textContent = t('s_saved');
+      setTimeout(() => { $('settings-status').textContent = ''; }, 2500);
+    });
+  }
 
   /* ---------------- สถานะเครือข่าย ---------------- */
   async function checkNet() {
@@ -483,14 +804,15 @@
     try {
       const ok = await DB.ping();
       el.className = 'net-status ' + (ok ? 'online' : 'offline');
-      el.title = ok ? 'เชื่อมต่อฐานข้อมูลออนไลน์แล้ว' : 'เชื่อมต่อฐานข้อมูลไม่ได้';
+      el.title = ok ? t('net_on') : t('net_off');
     } catch {
       el.className = 'net-status offline';
     }
   }
 
   /* ---------------- init ---------------- */
-  syncSettingsForm();
-  updateCalibStatus();
-  checkNet();
+  I18N.apply();
+  initLock();
+  if (isUnlocked()) showApp();
+  else $('lock-input').focus();
 })();

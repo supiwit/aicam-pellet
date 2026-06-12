@@ -32,7 +32,7 @@ const DB = (() => {
   async function listSessions(limit = 200) {
     const { data, error } = await client
       .from('measurement_sessions')
-      .select('id, created_at, sample_name, operator, pellet_count, avg_length_mm, avg_diameter_mm, image_url')
+      .select('id, created_at, sample_name, operator, pellet_count, avg_length_mm, avg_diameter_mm, image_url, die_size, insize_pct, spec_pass')
       .order('created_at', { ascending: false })
       .limit(limit);
     if (error) throw error;
