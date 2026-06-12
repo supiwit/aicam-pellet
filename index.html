@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#1b6e5a">
+<title>AICAM — วัดขนาดเม็ดอาหาร</title>
+<link rel="stylesheet" href="css/style.css">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="logo">🌾 AICAM <span>Pellet Analyzer</span></div>
+  <div id="net-status" class="net-status" title="สถานะการเชื่อมต่อ">●</div>
+</header>
+
+<!-- ============ TAB: วัดขนาด ============ -->
+<main id="tab-measure" class="tab active">
+
+  <section class="card">
+    <h2>1. ถ่ายรูปเม็ดอาหาร</h2>
+    <p class="hint">วางเม็ดอาหารบนพื้นเข้ม ไม่ให้เม็ดติดกัน พร้อมวัตถุอ้างอิงขนาดที่ทราบ (เช่น ไม้บรรทัด/เหรียญ)</p>
+    <div class="btn-row">
+      <label class="btn primary">
+        📷 ถ่ายรูป
+        <input type="file" id="input-camera" accept="image/*" capture="environment" hidden>
+      </label>
+      <label class="btn">
+        🖼 เลือกรูปจากเครื่อง
+        <input type="file" id="input-file" accept="image/*" hidden>
+      </label>
+    </div>
+  </section>
+
+  <section class="card" id="card-image" hidden>
+    <h2>2. คาลิเบรตมาตราส่วน</h2>
+    <div class="calib-bar">
+      <span id="calib-status" class="calib-status">ยังไม่ได้คาลิเบรต</span>
+      <button class="btn small" id="btn-calibrate">📏 คาลิเบรต</button>
+    </div>
+    <p class="hint" id="calib-hint" hidden>แตะ <b>2 จุด</b> บนภาพ ที่ปลายทั้งสองข้างของวัตถุอ้างอิงที่ทราบความยาว</p>
+    <div class="canvas-wrap">
+      <canvas id="canvas-main"></canvas>
+    </div>
+    <div class="btn-row">
+      <button class="btn primary big" id="btn-analyze">🔬 วิเคราะห์ภาพ</button>
+    </div>
+  </section>
+
+  <!-- ผลการวิเคราะห์ -->
+  <section class="card" id="card-results" hidden>
+    <h2>3. ผลการวิเคราะห์</h2>
+
+    <div class="stat-grid">
+      <div class="stat"><div class="stat-num" id="st-count">–</div><div class="stat-label">จำนวนเม็ด</div></div>
+      <div class="stat"><div class="stat-num" id="st-avg-len">–</div><div class="stat-label">ยาวเฉลี่ย (มม.)</div></div>
+      <div class="stat"><div class="stat-num" id="st-avg-dia">–</div><div class="stat-label">Ø เฉลี่ย (มม.)</div></div>
+      <div class="stat"><div class="stat-num" id="st-sd">–</div><div class="stat-label">SD ความยาว</div></div>
+      <div class="stat"><div class="stat-num" id="st-min">–</div><div class="stat-label">สั้นสุด (มม.)</div></div>
+      <div class="stat"><div class="stat-num" id="st-max">–</div><div class="stat-label">ยาวสุด (มม.)</div></div>
+    </div>
+
+    <div id="rejected-note" class="warn-note" hidden></div>
+
+    <h3>การกระจายความยาว (ซม.)</h3>
+    <div class="chart-box"><canvas id="chart-bar"></canvas></div>
+    <div class="chart-box donut"><canvas id="chart-donut"></canvas></div>
+
+    <h3>ตารางสัดส่วน</h3>
+    <table class="tbl" id="tbl-dist">
+      <thead><tr><th>ช่วง (ซม.)</th><th>จำนวน</th><th>%</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h3>สีเฉลี่ยของเม็ดอาหาร</h3>
+    <div class="color-row">
+      <div class="swatch-box">
+        <div class="swatch" id="swatch-avg"></div>
+        <div class="swatch-label">สีตัวอย่าง<br><span id="color-rgb" class="mono">–</span></div>
+      </div>
+      <div class="swatch-box" id="ref-color-box" hidden>
+        <div class="swatch" id="swatch-ref"></div>
+        <div class="swatch-label">สีอ้างอิง<br><span id="color-de" class="mono">ΔE = –</span></div>
+      </div>
+      <div id="color-verdict" class="verdict" hidden></div>
+    </div>
+
+    <details class="pellet-details">
+      <summary>ดูข้อมูลรายเม็ด</summary>
+      <table class="tbl" id="tbl-pellets">
+        <thead><tr><th>#</th><th>ยาว (มม.)</th><th>Ø (มม.)</th><th>สี</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </details>
+
+    <h3>บันทึกผล</h3>
+    <div class="form-grid">
+      <label>ชื่อตัวอย่าง / ล็อต <input type="text" id="f-sample" placeholder="เช่น ล็อต A-2026-06-12"></label>
+      <label>ผู้ตรวจ <input type="text" id="f-operator" placeholder="ชื่อผู้ตรวจ"></label>
+      <label class="full">หมายเหตุ <input type="text" id="f-notes" placeholder="หมายเหตุเพิ่มเติม"></label>
+    </div>
+    <div class="btn-row">
+      <button class="btn primary big" id="btn-save">💾 บันทึกขึ้นออนไลน์</button>
+      <button class="btn" id="btn-csv">⬇️ CSV</button>
+    </div>
+    <div id="save-status" class="save-status"></div>
+  </section>
+</main>
+
+<!-- ============ TAB: รายงาน ============ -->
+<main id="tab-reports" class="tab">
+  <section class="card">
+    <h2>📊 รายงานผลการวัด</h2>
+    <p class="hint">ข้อมูลทั้งหมดเก็บออนไลน์ — เปิดดูจากเครื่องไหนก็ได้</p>
+    <div class="btn-row">
+      <button class="btn small" id="btn-refresh">🔄 โหลดใหม่</button>
+      <button class="btn small" id="btn-export-all">⬇️ CSV สรุปทั้งหมด</button>
+    </div>
+    <div id="report-list" class="report-list">
+      <div class="empty">กำลังโหลด…</div>
+    </div>
+  </section>
+</main>
+
+<!-- ============ TAB: ตั้งค่า ============ -->
+<main id="tab-settings" class="tab">
+  <section class="card">
+    <h2>⚙️ ตั้งค่า</h2>
+    <div class="form-grid">
+      <label>มาตราส่วน (มม./พิกเซล)
+        <input type="number" id="s-mmpp" step="0.0001" min="0" placeholder="คาลิเบรตจากภาพ หรือกรอกเอง">
+      </label>
+      <label>ผู้ตรวจ (ค่าเริ่มต้น)
+        <input type="text" id="s-operator">
+      </label>
+      <label>ขอบช่วงความยาว (ซม. คั่นด้วย , )
+        <input type="text" id="s-bins" placeholder="0.2,0.5,0.8,1.0,1.2,1.5,2.0">
+      </label>
+      <label>พื้นหลังภาพ
+        <select id="s-polarity">
+          <option value="auto">ตรวจอัตโนมัติ</option>
+          <option value="dark">พื้นเข้ม เม็ดสว่าง</option>
+          <option value="light">พื้นสว่าง เม็ดเข้ม</option>
+        </select>
+      </label>
+      <label>ขนาดเล็กสุดที่นับ (มม.)
+        <input type="number" id="s-minlen" step="0.5" min="0" value="2">
+      </label>
+      <label>ขนาดใหญ่สุดที่นับ (มม.)
+        <input type="number" id="s-maxlen" step="1" min="1" value="50">
+      </label>
+      <label>สีอ้างอิง (มาตรฐาน)
+        <input type="color" id="s-refcolor" value="#c8a464">
+      </label>
+      <label class="check-label">
+        <input type="checkbox" id="s-userefcolor"> เปรียบเทียบสีกับสีอ้างอิง
+      </label>
+      <label>เกณฑ์สีผ่าน (ΔE ≤)
+        <input type="number" id="s-demax" step="1" min="1" value="10">
+      </label>
+    </div>
+    <div class="btn-row">
+      <button class="btn primary" id="btn-save-settings">บันทึกการตั้งค่า</button>
+    </div>
+    <p class="hint" id="settings-status"></p>
+  </section>
+</main>
+
+<!-- Modal ดูรายงานละเอียด -->
+<div id="modal" class="modal" hidden>
+  <div class="modal-body">
+    <button class="modal-close" id="modal-close">✕</button>
+    <div id="modal-content"></div>
+  </div>
+</div>
+
+<nav class="bottom-nav">
+  <button class="nav-btn active" data-tab="tab-measure">📷<span>วัดขนาด</span></button>
+  <button class="nav-btn" data-tab="tab-reports">📊<span>รายงาน</span></button>
+  <button class="nav-btn" data-tab="tab-settings">⚙️<span>ตั้งค่า</span></button>
+</nav>
+
+<script src="js/analyzer.js"></script>
+<script src="js/db.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
