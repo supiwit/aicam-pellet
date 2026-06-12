@@ -141,6 +141,13 @@
     $('lang-select').addEventListener('change', e => I18N.setLang(e.target.value));
     document.addEventListener('langchange', onLangChange);
 
+    ChatBot.init({
+      lang: I18N.lang,
+      getContext: () => state.results
+        ? { stats: state.results.stats, specResult: state.results.specResult, spec: currentSpec() }
+        : null,
+    });
+
     // deep link: ?report=<id>
     const rid = new URLSearchParams(location.search).get('report');
     if (rid) {
@@ -363,6 +370,7 @@
     renderDiaChart('chart-dia', stats, state.charts);
     renderDistTable($('tbl-dist').querySelector('tbody'), stats.distribution);
     renderColor(stats);
+    renderTexture(stats);
     renderPelletTable(pellets);
 
     if (settings.operator && !$('f-operator').value) $('f-operator').value = settings.operator;
@@ -480,20 +488,90 @@
     $('swatch-avg').style.background = `rgb(${ac.r},${ac.g},${ac.b})`;
     $('color-rgb').textContent = `RGB(${ac.r}, ${ac.g}, ${ac.b})`;
     const refBox = $('ref-color-box'), verdict = $('color-verdict');
+
+    const lab = ac.lab;
+    let labHtml = `
+      <h3 style="margin-top:0">${t('lab_title')}</h3>
+      <div class="lab-vals">
+        <div class="lab-val"><b>${(+lab.l).toFixed(1)}</b><span>L* (0-100)</span></div>
+        <div class="lab-val"><b>${(+lab.a).toFixed(1)}</b><span>a* (−G / +R)</span></div>
+        <div class="lab-val"><b>${(+lab.b).toFixed(1)}</b><span>b* (−B / +Y)</span></div>
+      </div>`;
+
     if (settings.userefcolor) {
       const ref = hexToRgb(settings.refcolor);
-      const de = Analyzer.deltaE(ac.lab, Analyzer.rgb2lab(ref.r, ref.g, ref.b));
-      ac.delta_e = +de.toFixed(1);
+      const refLab = Analyzer.rgb2lab(ref.r, ref.g, ref.b);
+      const de76 = Analyzer.deltaE(lab, refLab);
+      const de00 = Analyzer.deltaE2000(lab, refLab);
+      ac.delta_e76 = +de76.toFixed(2);
+      ac.delta_e00 = +de00.toFixed(2);
+      ac.ref_lab = { l: +refLab.l.toFixed(2), a: +refLab.a.toFixed(2), b: +refLab.b.toFixed(2) };
       refBox.hidden = false;
       $('swatch-ref').style.background = settings.refcolor;
-      $('color-de').textContent = `ΔE = ${de.toFixed(1)}`;
+      $('color-de').textContent = `ΔE00 = ${de00.toFixed(1)}`;
       verdict.hidden = false;
-      const pass = de <= +settings.demax;
+      const pass = de00 <= +settings.demax;
       verdict.className = 'verdict ' + (pass ? 'pass' : 'fail');
       verdict.textContent = pass ? t('color_pass') : t('color_fail');
+
+      const dL = lab.l - refLab.l, dA = lab.a - refLab.a, dB = lab.b - refLab.b;
+      labHtml += `
+        <div class="lab-vals">
+          <div class="lab-val"><b>${dL >= 0 ? '+' : ''}${dL.toFixed(1)}</b><span>ΔL* (${t('color_ref')} ${refLab.l.toFixed(1)})</span></div>
+          <div class="lab-val"><b>${dA >= 0 ? '+' : ''}${dA.toFixed(1)}</b><span>Δa* (${t('color_ref')} ${refLab.a.toFixed(1)})</span></div>
+          <div class="lab-val"><b>${dB >= 0 ? '+' : ''}${dB.toFixed(1)}</b><span>Δb* (${t('color_ref')} ${refLab.b.toFixed(1)})</span></div>
+        </div>
+        <div class="lab-de">
+          <div class="de-box"><b>${de76.toFixed(2)}</b><span>ΔE*ab (CIE76)</span></div>
+          <div class="de-box"><b>${de00.toFixed(2)}</b><span>ΔE00 (CIEDE2000)</span></div>
+        </div>
+        <div class="lab-formula">ΔE*ab = √(ΔL*² + Δa*² + Δb*²) = √(${dL.toFixed(1)}² + ${dA.toFixed(1)}² + ${dB.toFixed(1)}²) = ${de76.toFixed(2)}</div>`;
     } else {
       refBox.hidden = true; verdict.hidden = true;
     }
+    $('lab-panel').innerHTML = labHtml;
+    $('lab-panel').hidden = false;
+  }
+
+  /* ---------------- คุณภาพหน้าตัดเม็ด ---------------- */
+  function renderTexture(stats) {
+    const tx = stats.texture;
+    const panel = $('texture-panel');
+    if (!tx) { panel.hidden = true; return; }
+    panel.hidden = false;
+
+    const ring = panel.querySelector('.tex-score-ring');
+    ring.style.setProperty('--p', tx.score);
+    $('tex-score').textContent = tx.score.toFixed(0);
+    $('tex-grade').textContent = `${t('tex_score_label')} · ${tx.grade}`;
+
+    $('tex-cards').innerHTML = `
+      <div class="tex-card"><b>${tx.fineness}</b><span>${t('tex_fineness')}</span></div>
+      <div class="tex-card"><b>${tx.roughness_pct}%</b><span>${t('tex_rough')}</span></div>
+      <div class="tex-card"><b>${tx.homogeneity}</b><span>${t('tex_homog')}</span></div>
+      <div class="tex-card"><b>${tx.contrast}</b><span>${t('tex_contrast')}</span></div>
+      <div class="tex-card"><b>${tx.entropy}</b><span>${t('tex_entropy')}</span></div>
+      <div class="tex-card"><b>${tx.uniformity}</b><span>${t('tex_uniform')}</span></div>`;
+
+    if (state.charts['chart-radar']) state.charts['chart-radar'].destroy();
+    state.charts['chart-radar'] = new Chart($('chart-radar'), {
+      type: 'radar',
+      data: {
+        labels: [t('r_fine'), t('r_homog'), t('r_uniform'), t('r_smooth'), t('r_energy')],
+        datasets: [{
+          data: [tx.fineness, tx.homogeneity * 100, tx.uniformity, tx.smoothness,
+                 Math.min(100, tx.energy * 100 * 2)],
+          backgroundColor: 'rgba(27,110,90,.25)',
+          borderColor: '#1b6e5a',
+          pointBackgroundColor: '#1b6e5a',
+        }],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false }, title: { display: true, text: t('radar_title') } },
+        scales: { r: { beginAtZero: true, max: 100, ticks: { stepSize: 25, font: { size: 9 } } } },
+      },
+    });
   }
 
   function renderPelletTable(pellets) {
@@ -547,6 +625,7 @@
           sd_diameter_mm: s.sd_diameter_mm,
           distribution: s.distribution,
           avg_color: s.avg_color,
+          texture: s.texture,
           mm_per_px: +settings.mmpp,
           pellets: state.results.pellets,
           die_size: spec ? String(spec.die) : null,
@@ -617,6 +696,25 @@
         [t('csv_die'), s.die_size],
         [t('csv_under'), s.under_pct], [t('csv_insize'), s.insize_pct], [t('csv_over'), s.over_pct],
         [t('csv_result'), s.spec_pass ? t('csv_pass') : t('csv_fail')]);
+    }
+    if (s.avg_color && s.avg_color.lab) {
+      const lab = s.avg_color.lab;
+      rows.push([],
+        ['CIELAB', ''],
+        ['L*', lab.l], ['a*', lab.a], ['b*', lab.b]);
+      if (s.avg_color.delta_e76 != null) {
+        rows.push(['ΔE*ab (CIE76)', s.avg_color.delta_e76], ['ΔE00 (CIEDE2000)', s.avg_color.delta_e00]);
+      }
+    }
+    if (s.texture) {
+      const tx = s.texture;
+      rows.push([],
+        [t('tex_title'), ''],
+        [t('tex_score_label'), tx.score], ['Grade', tx.grade],
+        [t('tex_fineness'), tx.fineness], [t('tex_rough'), tx.roughness_pct],
+        [t('tex_homog'), tx.homogeneity], [t('tex_contrast'), tx.contrast],
+        [t('tex_entropy'), tx.entropy], ['Energy (GLCM)', tx.energy],
+        ['Laplacian variance', tx.lap_var], ['CV', tx.cv]);
     }
     rows.push([],
       [t('th_range_cm'), t('th_count'), t('th_pct')],
@@ -726,8 +824,34 @@
         ${ac ? `<h3>${t('color_title')}</h3>
           <div class="color-row"><div class="swatch-box">
             <div class="swatch" style="background:rgb(${ac.r},${ac.g},${ac.b})"></div>
-            <div class="swatch-label">RGB(${ac.r}, ${ac.g}, ${ac.b})${ac.delta_e != null ? `<br>ΔE = ${ac.delta_e}` : ''}</div>
-          </div></div>` : ''}
+            <div class="swatch-label">RGB(${ac.r}, ${ac.g}, ${ac.b})${ac.delta_e00 != null ? `<br>ΔE00 = ${ac.delta_e00}` : (ac.delta_e != null ? `<br>ΔE = ${ac.delta_e}` : '')}</div>
+          </div></div>
+          ${ac.lab ? `<div class="lab-panel">
+            <div class="lab-vals">
+              <div class="lab-val"><b>${(+ac.lab.l).toFixed(1)}</b><span>L*</span></div>
+              <div class="lab-val"><b>${(+ac.lab.a).toFixed(1)}</b><span>a*</span></div>
+              <div class="lab-val"><b>${(+ac.lab.b).toFixed(1)}</b><span>b*</span></div>
+            </div>
+            ${ac.delta_e76 != null ? `<div class="lab-de">
+              <div class="de-box"><b>${ac.delta_e76}</b><span>ΔE*ab (CIE76)</span></div>
+              <div class="de-box"><b>${ac.delta_e00}</b><span>ΔE00 (CIEDE2000)</span></div>
+            </div>` : ''}
+          </div>` : ''}` : ''}
+        ${s.texture ? `<h3>${t('tex_title')}</h3>
+          <div class="texture-panel">
+            <div class="tex-head">
+              <div class="tex-score-ring" style="--p:${s.texture.score}">
+                <div class="tex-score">${(+s.texture.score).toFixed(0)}</div>
+                <div class="tex-grade">${t('tex_score_label')} · ${s.texture.grade}</div>
+              </div>
+              <div class="tex-cards">
+                <div class="tex-card"><b>${s.texture.fineness}</b><span>${t('tex_fineness')}</span></div>
+                <div class="tex-card"><b>${s.texture.roughness_pct}%</b><span>${t('tex_rough')}</span></div>
+                <div class="tex-card"><b>${s.texture.homogeneity}</b><span>${t('tex_homog')}</span></div>
+                <div class="tex-card"><b>${s.texture.entropy}</b><span>${t('tex_entropy')}</span></div>
+              </div>
+            </div>
+          </div>` : ''}
         <div class="btn-row">
           <button class="btn" id="m-share">${t('share_btn')}</button>
           <button class="btn" id="m-csv">${t('csv_btn')}</button>

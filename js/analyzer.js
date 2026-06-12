@@ -117,8 +117,103 @@ const Analyzer = (() => {
     return { l: 116 * y - 16, a: 500 * (x - y), b: 200 * (y - z) };
   }
 
+  /** ΔE*ab (CIE76) */
   function deltaE(lab1, lab2) {
     return Math.sqrt((lab1.l - lab2.l) ** 2 + (lab1.a - lab2.a) ** 2 + (lab1.b - lab2.b) ** 2);
+  }
+
+  /** ΔE00 (CIEDE2000, kL=kC=kH=1) — มาตรฐาน CIE ปัจจุบันสำหรับความต่างสี */
+  function deltaE2000(lab1, lab2) {
+    const { l: L1, a: a1, b: b1 } = lab1, { l: L2, a: a2, b: b2 } = lab2;
+    const rad = Math.PI / 180;
+    const C1 = Math.hypot(a1, b1), C2 = Math.hypot(a2, b2);
+    const Cb = (C1 + C2) / 2;
+    const G = 0.5 * (1 - Math.sqrt(Cb ** 7 / (Cb ** 7 + 25 ** 7)));
+    const a1p = (1 + G) * a1, a2p = (1 + G) * a2;
+    const C1p = Math.hypot(a1p, b1), C2p = Math.hypot(a2p, b2);
+    const h1p = C1p ? (Math.atan2(b1, a1p) / rad + 360) % 360 : 0;
+    const h2p = C2p ? (Math.atan2(b2, a2p) / rad + 360) % 360 : 0;
+    const dLp = L2 - L1, dCp = C2p - C1p;
+    let dhp = 0;
+    if (C1p * C2p) {
+      dhp = h2p - h1p;
+      if (dhp > 180) dhp -= 360; else if (dhp < -180) dhp += 360;
+    }
+    const dHp = 2 * Math.sqrt(C1p * C2p) * Math.sin(dhp * rad / 2);
+    const Lbp = (L1 + L2) / 2, Cbp = (C1p + C2p) / 2;
+    let hbp = h1p + h2p;
+    if (C1p * C2p) {
+      if (Math.abs(h1p - h2p) > 180) hbp += (h1p + h2p < 360) ? 360 : -360;
+      hbp /= 2;
+    }
+    const T = 1 - 0.17 * Math.cos((hbp - 30) * rad) + 0.24 * Math.cos(2 * hbp * rad)
+            + 0.32 * Math.cos((3 * hbp + 6) * rad) - 0.20 * Math.cos((4 * hbp - 63) * rad);
+    const dTheta = 30 * Math.exp(-(((hbp - 275) / 25) ** 2));
+    const RC = 2 * Math.sqrt(Cbp ** 7 / (Cbp ** 7 + 25 ** 7));
+    const SL = 1 + 0.015 * (Lbp - 50) ** 2 / Math.sqrt(20 + (Lbp - 50) ** 2);
+    const SC = 1 + 0.045 * Cbp, SH = 1 + 0.015 * Cbp * T;
+    const RT = -Math.sin(2 * dTheta * rad) * RC;
+    return Math.sqrt((dLp / SL) ** 2 + (dCp / SC) ** 2 + (dHp / SH) ** 2 + RT * (dCp / SC) * (dHp / SH));
+  }
+
+  /**
+   * วิเคราะห์เนื้อสัมผัสหน้าตัดเม็ด (texture) ตามหลักวิชาการ:
+   *  - GLCM (Haralick, 1973): contrast, homogeneity, energy, entropy (16 ระดับเทา, เพื่อนบ้านแนวนอน+ตั้ง)
+   *  - Laplacian variance: พลังงานความถี่สูง → ดัชนีความละเอียดเนื้อเม็ด
+   *  - CV ความเข้มแสง: ความสม่ำเสมอของผิว
+   */
+  function textureMetrics(px, w, data) {
+    const set = new Set(px);
+    const grayAt = i => {
+      const p = i * 4;
+      return data[p] * 0.299 + data[p + 1] * 0.587 + data[p + 2] * 0.114;
+    };
+    const n = px.length;
+    let sum = 0, sum2 = 0;
+    for (const i of px) { const v = grayAt(i); sum += v; sum2 += v * v; }
+    const mu = sum / n;
+    const sigma = Math.sqrt(Math.max(0, sum2 / n - mu * mu));
+    const cv = mu > 0 ? sigma / mu : 0;
+
+    // GLCM 16 ระดับ
+    const L = 16;
+    const glcm = new Float64Array(L * L);
+    let pairs = 0;
+    const q = v => Math.min(L - 1, (v * L / 256) | 0);
+    for (const i of px) {
+      if (set.has(i + 1)) { glcm[q(grayAt(i)) * L + q(grayAt(i + 1))]++; pairs++; }
+      if (set.has(i + w)) { glcm[q(grayAt(i)) * L + q(grayAt(i + w))]++; pairs++; }
+    }
+    let contrast = 0, homogeneity = 0, energy = 0, entropy = 0;
+    if (pairs) {
+      for (let a = 0; a < L; a++) for (let b = 0; b < L; b++) {
+        const p = glcm[a * L + b] / pairs;
+        if (!p) continue;
+        contrast += p * (a - b) * (a - b);
+        homogeneity += p / (1 + Math.abs(a - b));
+        energy += p * p;
+        entropy -= p * Math.log2(p);
+      }
+    }
+
+    // Laplacian variance (เฉพาะพิกเซลที่มีเพื่อนบ้านครบ 4 ภายในเม็ด)
+    let ls = 0, ls2 = 0, ln = 0;
+    for (const i of px) {
+      if (set.has(i + 1) && set.has(i - 1) && set.has(i + w) && set.has(i - w)) {
+        const lap = 4 * grayAt(i) - grayAt(i + 1) - grayAt(i - 1) - grayAt(i + w) - grayAt(i - w);
+        ls += lap; ls2 += lap * lap; ln++;
+      }
+    }
+    const lapVar = ln ? Math.max(0, ls2 / ln - (ls / ln) ** 2) : 0;
+
+    return {
+      cv: +cv.toFixed(4),
+      contrast: +contrast.toFixed(3),
+      homogeneity: +homogeneity.toFixed(4),
+      energy: +energy.toFixed(4),
+      entropy: +entropy.toFixed(3),
+      lap_var: +lapVar.toFixed(1),
+    };
   }
 
   function median(arr) {
@@ -181,7 +276,16 @@ const Analyzer = (() => {
     const lo = Math.floor(nCols * 0.2), hi = Math.ceil(nCols * 0.8);
     const midWidths = widths.slice(lo, hi).filter(v => v > 0);
 
+    // ความขรุขระผิว (Ra-like): CV ของโปรไฟล์ความกว้างช่วงกลางเม็ด × 100%
+    let roughnessPct = 0;
+    if (midWidths.length > 2) {
+      const wMean = midWidths.reduce((s, v) => s + v, 0) / midWidths.length;
+      const wSd = Math.sqrt(midWidths.reduce((s, v) => s + (v - wMean) ** 2, 0) / midWidths.length);
+      roughnessPct = wMean > 0 ? +(wSd * 100 / wMean).toFixed(2) : 0;
+    }
+
     return {
+      roughnessPct,
       mx, my, cosT, sinT, uMin, uMax, vMin, vMax,
       lengthPx: uMax - uMin + 1,
       diaPx: midWidths.length ? median(midWidths) : (vMax - vMin + 1),
@@ -283,6 +387,7 @@ const Analyzer = (() => {
 
       const m = measureComponent(px, w, data);
       m.touchBorder = touchBorder;
+      m.px = px;
 
       // ---- ลองแยกเม็ดติดกัน (เฉพาะก้อนที่ยาวเกินปกติและมีคอคอด) ----
       const parts = [];
@@ -301,7 +406,11 @@ const Analyzer = (() => {
             groups[g].push(i);
           }
           for (const g of groups) {
-            if (g.length >= minAreaPx) parts.push(measureComponent(g, w, data));
+            if (g.length >= minAreaPx) {
+              const pm = measureComponent(g, w, data);
+              pm.px = g;
+              parts.push(pm);
+            }
           }
           if (parts.length >= 2) splitCount += parts.length - 1;
         }
@@ -319,6 +428,7 @@ const Analyzer = (() => {
         if (lenMm > maxLenMm || (finals === parts ? false : touchBorder)) {
           rejectedCount++; rejectedBoxes.push(f); continue;
         }
+        f.texture = textureMetrics(f.px, w, data);
         accepted.push(f);
       }
     }
@@ -359,6 +469,8 @@ const Analyzer = (() => {
         length_mm: +b.lenMm.toFixed(2),
         diameter_mm: +b.diaMm.toFixed(2),
         color: b.color,
+        roughness_pct: b.roughnessPct,
+        texture: b.texture,
       })),
       rejected: rejectedCount,
       splits: splitCount,
@@ -411,10 +523,43 @@ const Analyzer = (() => {
       const r = Math.round(mean(pellets.map(p => p.color.r)));
       const g = Math.round(mean(pellets.map(p => p.color.g)));
       const b = Math.round(mean(pellets.map(p => p.color.b)));
-      avgColor = { r, g, b, lab: rgb2lab(r, g, b) };
+      const lab = rgb2lab(r, g, b);
+      avgColor = { r, g, b, lab: { l: +lab.l.toFixed(2), a: +lab.a.toFixed(2), b: +lab.b.toFixed(2) } };
+    }
+
+    // ---- คุณภาพหน้าตัดเม็ด (เฉลี่ยทุกเม็ด) ----
+    // FI = 100·e^(−Var(∇²I)/500), Uniformity = 100(1−3·CV), Smoothness = 100(1−Ra%/30)
+    // Score = 0.3·FI + 0.3·Homogeneity·100 + 0.2·Uniformity + 0.2·Smoothness
+    let texture = null;
+    const tx = pellets.filter(p => p.texture);
+    if (tx.length) {
+      const m = f => mean(tx.map(f));
+      const lapVar = m(p => p.texture.lap_var);
+      const homogeneity = m(p => p.texture.homogeneity);
+      const fineness = 100 * Math.exp(-lapVar / 500);
+      const cv = m(p => p.texture.cv);
+      const roughness = m(p => p.roughness_pct || 0);
+      const uniformity = 100 * Math.max(0, 1 - cv * 3);
+      const smoothness = 100 * Math.max(0, 1 - roughness / 30);
+      const score = 0.3 * fineness + 0.3 * homogeneity * 100 + 0.2 * uniformity + 0.2 * smoothness;
+      texture = {
+        fineness: +fineness.toFixed(1),
+        homogeneity: +homogeneity.toFixed(3),
+        contrast: +m(p => p.texture.contrast).toFixed(2),
+        entropy: +m(p => p.texture.entropy).toFixed(2),
+        energy: +m(p => p.texture.energy).toFixed(3),
+        cv: +cv.toFixed(3),
+        lap_var: +lapVar.toFixed(1),
+        roughness_pct: +roughness.toFixed(1),
+        uniformity: +uniformity.toFixed(1),
+        smoothness: +smoothness.toFixed(1),
+        score: +score.toFixed(1),
+        grade: score >= 80 ? 'A' : score >= 65 ? 'B' : score >= 50 ? 'C' : 'D',
+      };
     }
 
     return {
+      texture,
       count: n,
       avg_length_mm: +avgLen.toFixed(2),
       sd_length_mm: +sd(lens, avgLen).toFixed(2),
@@ -448,5 +593,5 @@ const Analyzer = (() => {
     };
   }
 
-  return { analyze, computeStats, checkSpec, rgb2lab, deltaE };
+  return { analyze, computeStats, checkSpec, rgb2lab, deltaE, deltaE2000 };
 })();

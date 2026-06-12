@@ -155,6 +155,20 @@
       </div>
       <div id="color-verdict" class="verdict" hidden></div>
     </div>
+    <div id="lab-panel" class="lab-panel" hidden></div>
+
+    <h3 data-i18n="tex_title">คุณภาพหน้าตัดเม็ด</h3>
+    <div id="texture-panel" class="texture-panel" hidden>
+      <div class="tex-head">
+        <div class="tex-score-ring">
+          <div class="tex-score" id="tex-score">–</div>
+          <div class="tex-grade" id="tex-grade">–</div>
+        </div>
+        <div class="tex-cards" id="tex-cards"></div>
+      </div>
+      <div class="chart-box donut"><canvas id="chart-radar"></canvas></div>
+      <p class="hint" data-i18n="tex_hint"></p>
+    </div>
 
     <details class="pellet-details">
       <summary data-i18n="pellet_details">ดูข้อมูลรายเม็ด</summary>
@@ -269,6 +283,21 @@
 
 <div id="toast" class="toast" hidden></div>
 
+<!-- บอทแชทผู้ช่วย -->
+<button id="chat-fab" class="chat-fab" title="AICAM Assistant">💬</button>
+<div id="chat-panel" class="chat-panel" hidden>
+  <div class="chat-header">
+    <span id="chat-title">🤖 ผู้ช่วย AICAM</span>
+    <button id="chat-close" class="chat-x">✕</button>
+  </div>
+  <div id="chat-msgs" class="chat-msgs"></div>
+  <div id="chat-chips" class="chat-chips"></div>
+  <div class="chat-inputrow">
+    <input id="chat-input" type="text" placeholder="พิมพ์คำถาม…">
+    <button id="chat-send" class="btn primary small">ส่ง</button>
+  </div>
+</div>
+
 <nav class="bottom-nav">
   <button class="nav-btn active" data-tab="tab-measure">📷<span data-i18n="nav_measure">วัดขนาด</span></button>
   <button class="nav-btn" data-tab="tab-reports">📊<span data-i18n="nav_reports">รายงาน</span></button>
@@ -280,6 +309,7 @@
 <script src="js/i18n.js"></script>
 <script src="js/analyzer.js"></script>
 <script src="js/db.js"></script>
+<script src="js/chatbot.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>
