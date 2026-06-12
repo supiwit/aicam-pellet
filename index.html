@@ -89,6 +89,7 @@
     </div>
     <div class="canvas-wrap">
       <canvas id="canvas-main"></canvas>
+      <div id="scan-line" class="scan-line" hidden></div>
     </div>
     <div class="btn-row">
       <button class="btn primary big" id="btn-analyze" data-i18n="analyze_btn">🔬 วิเคราะห์ภาพ</button>
@@ -105,6 +106,8 @@
       <div class="stat"><div class="stat-num" id="st-sd">–</div><div class="stat-label" data-i18n="st_sd"></div></div>
       <div class="stat"><div class="stat-num" id="st-min">–</div><div class="stat-label" data-i18n="st_min"></div></div>
       <div class="stat"><div class="stat-num" id="st-max">–</div><div class="stat-label" data-i18n="st_max"></div></div>
+      <div class="stat"><div class="stat-num" id="st-area">–</div><div class="stat-label" data-i18n="st_area"></div></div>
+      <div class="stat"><div class="stat-num" id="st-cv">–</div><div class="stat-label" data-i18n="st_cv"></div></div>
     </div>
 
     <div id="split-note" class="info-note" hidden></div>
@@ -201,6 +204,10 @@
     <div class="btn-row">
       <button class="btn small" id="btn-refresh" data-i18n="rep_refresh">🔄 โหลดใหม่</button>
       <button class="btn small" id="btn-export-all" data-i18n="rep_export">⬇️ CSV สรุปทั้งหมด</button>
+    </div>
+    <div id="trend-box" hidden>
+      <h3 data-i18n="trend_title">📈 แนวโน้มคุณภาพย้อนหลัง</h3>
+      <div class="chart-box"><canvas id="chart-trend"></canvas></div>
     </div>
     <div id="report-list" class="report-list"></div>
   </section>

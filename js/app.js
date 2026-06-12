@@ -39,7 +39,7 @@
     userefcolor: false,
     demax: 10,
     pin: '1234',
-    die: '',
+    die: 'auto',
     specs: DEFAULT_SPECS,
   };
   const stored = JSON.parse(localStorage.getItem('aicam-settings') || '{}');
@@ -61,6 +61,31 @@
   }
   function currentSpec() {
     return settings.specs.find(s => String(s.die) === String(settings.die)) || null;
+  }
+
+  /** เลือกสเปกอัตโนมัติ: Die ที่ Ø ใกล้ Ø เฉลี่ยที่วัดได้ที่สุด (เสมอกัน → ตัวที่ Insize สูงกว่า) */
+  function autoDetectSpec(pellets, stats) {
+    const cands = settings.specs.filter(s => !isNaN(parseFloat(s.die)) && s.max_mm > 0);
+    if (!cands.length || !stats.count) return null;
+    const d = stats.avg_diameter_mm;
+    const sorted = cands.slice().sort((a, b) =>
+      Math.abs(parseFloat(a.die) - d) - Math.abs(parseFloat(b.die) - d));
+    let best = sorted[0];
+    if (sorted[1] &&
+        Math.abs(parseFloat(sorted[1].die) - d) - Math.abs(parseFloat(best.die) - d) < 0.15) {
+      const i0 = Analyzer.checkSpec(pellets, best)?.insize_pct ?? 0;
+      const i1 = Analyzer.checkSpec(pellets, sorted[1])?.insize_pct ?? 0;
+      if (i1 > i0) best = sorted[1];
+    }
+    return best;
+  }
+
+  /** สเปกที่ใช้งานจริงตามโหมดที่เลือก */
+  function resolveSpec(pellets, stats) {
+    if (settings.die === 'auto') {
+      return { spec: autoDetectSpec(pellets, stats), auto: true };
+    }
+    return { spec: currentSpec(), auto: false };
   }
 
   /* ---------------- toast ---------------- */
@@ -144,7 +169,7 @@
     ChatBot.init({
       lang: I18N.lang,
       getContext: () => state.results
-        ? { stats: state.results.stats, specResult: state.results.specResult, spec: currentSpec() }
+        ? { stats: state.results.stats, specResult: state.results.specResult, spec: state.results.spec }
         : null,
     });
 
@@ -283,16 +308,21 @@
   /* ---------------- ไซซ์ die ---------------- */
   function populateDieSelect() {
     const sel = $('die-select');
-    sel.innerHTML = `<option value="">${t('die_none')}</option>` +
+    sel.innerHTML = `<option value="auto">${t('die_auto')}</option>` +
+      `<option value="">${t('die_none')}</option>` +
       settings.specs.map(s =>
         `<option value="${s.die}">Die ${s.die} — ${s.min_mm}-${s.max_mm} mm (≥${s.target_pct}%)</option>`).join('');
-    sel.value = settings.die || '';
+    sel.value = settings.die ?? 'auto';
+    if (sel.selectedIndex < 0) sel.value = 'auto';
     sel.onchange = () => {
       settings.die = sel.value;
       saveSettings();
       if (state.results) {
-        state.results.specResult = Analyzer.checkSpec(state.results.pellets, currentSpec());
-        renderSpecPanel();
+        const r = resolveSpec(state.results.pellets, state.results.stats);
+        state.results.spec = r.spec;
+        state.results.specAuto = r.auto;
+        state.results.specResult = Analyzer.checkSpec(state.results.pellets, r.spec);
+        renderSpecPanel(false);
       }
     };
   }
@@ -304,6 +334,7 @@
       if (!(settings.mmpp > 0)) { alert(t('cal_alert')); return; }
       $('loading-text').textContent = t('analyzing');
       $('loading').hidden = false;
+      $('scan-line').hidden = false;
       setTimeout(() => {
         try {
           const res = Analyzer.analyze(state.img, +settings.mmpp, {
@@ -313,8 +344,9 @@
             autoSplit: !!settings.autosplit,
           });
           const stats = Analyzer.computeStats(res.pellets, binsArray());
-          const specResult = Analyzer.checkSpec(res.pellets, currentSpec());
-          state.results = { ...res, stats, specResult };
+          const r = resolveSpec(res.pellets, stats);
+          const specResult = Analyzer.checkSpec(res.pellets, r.spec);
+          state.results = { ...res, stats, specResult, spec: r.spec, specAuto: r.auto };
           state.lastSavedId = null;
           renderResults(true);
         } catch (err) {
@@ -322,8 +354,9 @@
           console.error(err);
         } finally {
           $('loading').hidden = true;
+          $('scan-line').hidden = true;
         }
-      }, 60);
+      }, 420);
     });
   }
 
@@ -357,6 +390,8 @@
     set('st-sd', stats.sd_length_mm, 1);
     set('st-min', stats.min_length_mm, 1);
     set('st-max', stats.max_length_mm, 1);
+    set('st-area', stats.avg_area_mm2 || 0, 2);
+    set('st-cv', stats.cv_pct || 0, 1);
 
     const sp = $('split-note');
     if (splits > 0) { sp.hidden = false; sp.textContent = '✂️ ' + t('split_note', { n: splits }); }
@@ -365,7 +400,7 @@
     if (rejected > 0) { rj.hidden = false; rj.textContent = '⚠️ ' + t('rejected_note', { n: rejected }); }
     else rj.hidden = true;
 
-    renderSpecPanel();
+    renderSpecPanel(animate);
     renderCharts('chart-bar', 'chart-donut', stats, state.charts);
     renderDiaChart('chart-dia', stats, state.charts);
     renderDistTable($('tbl-dist').querySelector('tbody'), stats.distribution);
@@ -379,9 +414,24 @@
   }
 
   /* ---------------- spec panel ---------------- */
-  function renderSpecPanel() {
+  /** คอนเฟตติฉลองตอนผ่านเกณฑ์ */
+  function fireConfetti() {
+    const colors = ['#34d399', '#facc15', '#3b82f6', '#f472b6', '#fb923c', '#a78bfa'];
+    for (let i = 0; i < 42; i++) {
+      const el = document.createElement('div');
+      el.className = 'confetti';
+      el.style.left = Math.random() * 100 + 'vw';
+      el.style.background = colors[i % colors.length];
+      el.style.animationDuration = (1.4 + Math.random() * 1.4) + 's';
+      el.style.animationDelay = (Math.random() * 0.5) + 's';
+      document.body.appendChild(el);
+      setTimeout(() => el.remove(), 3200);
+    }
+  }
+
+  function renderSpecPanel(animate) {
     const panel = $('spec-panel');
-    const spec = currentSpec();
+    const spec = state.results ? state.results.spec : null;
     const sr = state.results ? state.results.specResult : null;
     if (!spec || !sr) { panel.hidden = true; return; }
     panel.hidden = false;
@@ -390,9 +440,11 @@
     badge.className = 'spec-badge ' + (sr.pass ? 'pass' : 'fail');
     badge.textContent = sr.pass ? t('spec_pass') : t('spec_fail');
 
+    const autoTag = state.results.specAuto ? ` · ${t('spec_auto')}` : '';
     $('spec-meta').textContent =
-      `${t('spec_die_dia', { d: spec.die })} · ${t('spec_range', { min: spec.min_mm, max: spec.max_mm })}`;
+      `${t('spec_die_dia', { d: spec.die })} · ${t('spec_range', { min: spec.min_mm, max: spec.max_mm })}${autoTag}`;
     $('spec-target').textContent = '🎯 ' + t('spec_target', { t: spec.target_pct });
+    if (animate && sr.pass) fireConfetti();
 
     const segs = [
       ['seg-under', 'lg-under', sr.under_pct],
@@ -610,7 +662,7 @@
         const blob = await new Promise(r => state.results.annotated.toBlob(r, 'image/jpeg', 0.85));
         const s = state.results.stats;
         const sr = state.results.specResult;
-        const spec = currentSpec();
+        const spec = state.results.spec;
         if ($('f-operator').value) { settings.operator = $('f-operator').value; saveSettings(); }
         const saved = await DB.saveSession({
           sample_name: $('f-sample').value || null,
@@ -660,7 +712,7 @@
         ...state.results.stats,
         pellet_count: state.results.stats.count,
         sample_name: $('f-sample').value, operator: $('f-operator').value, notes: $('f-notes').value,
-        die_size: settings.die || null,
+        die_size: state.results.spec ? String(state.results.spec.die) : null,
         under_pct: state.results.specResult?.under_pct,
         insize_pct: state.results.specResult?.insize_pct,
         over_pct: state.results.specResult?.over_pct,
@@ -726,15 +778,52 @@
   }
 
   /* ---------------- รายงาน ---------------- */
+  function renderTrend(rows) {
+    const box = $('trend-box');
+    const data = rows.slice().reverse(); // เก่า → ใหม่
+    if (data.length < 2) { box.hidden = true; return; }
+    box.hidden = false;
+    const labels = data.map(r => new Date(r.created_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' }));
+    if (state.charts['chart-trend']) state.charts['chart-trend'].destroy();
+    state.charts['chart-trend'] = new Chart($('chart-trend'), {
+      type: 'line',
+      data: {
+        labels,
+        datasets: [
+          {
+            label: t('trend_len'), data: data.map(r => +r.avg_length_mm),
+            borderColor: '#1b6e5a', backgroundColor: 'rgba(27,110,90,.12)',
+            tension: .35, fill: true, yAxisID: 'y',
+          },
+          {
+            label: t('trend_insize'), data: data.map(r => r.insize_pct != null ? +r.insize_pct : null),
+            borderColor: '#3b82f6', borderDash: [6, 4],
+            tension: .35, spanGaps: true, yAxisID: 'y2',
+          },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 14, font: { size: 11 } } } },
+        scales: {
+          y: { beginAtZero: true, title: { display: true, text: 'mm', font: { size: 10 } } },
+          y2: { position: 'right', min: 0, max: 100, grid: { drawOnChartArea: false }, title: { display: true, text: '%', font: { size: 10 } } },
+        },
+      },
+    });
+  }
+
   async function loadReports() {
     const list = $('report-list');
     list.innerHTML = `<div class="empty">${t('rep_loading')}</div>`;
     try {
       const rows = await DB.listSessions();
       if (!rows.length) {
+        $('trend-box').hidden = true;
         list.innerHTML = `<div class="empty">🌾<br>${t('rep_empty')}</div>`;
         return;
       }
+      renderTrend(rows.slice(0, 30));
       list.innerHTML = '';
       rows.forEach((r, idx) => {
         const div = document.createElement('div');

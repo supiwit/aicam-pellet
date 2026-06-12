@@ -284,10 +284,18 @@ const Analyzer = (() => {
       roughnessPct = wMean > 0 ? +(wSd * 100 / wMean).toFixed(2) : 0;
     }
 
+    // ความยาวแบบ robust: ตัด outlier 0.4% หัวท้าย กันพิกเซลหลุด/เงาแหลม
+    let lengthPx = uMax - uMin + 1;
+    if (n > 50) {
+      const su = Float32Array.from(us).sort();
+      lengthPx = su[Math.min(n - 1, Math.ceil(0.996 * (n - 1)))] -
+                 su[Math.max(0, Math.floor(0.004 * (n - 1)))] + 1;
+    }
+
     return {
       roughnessPct,
       mx, my, cosT, sinT, uMin, uMax, vMin, vMax,
-      lengthPx: uMax - uMin + 1,
+      lengthPx,
       diaPx: midWidths.length ? median(midWidths) : (vMax - vMin + 1),
       widths, nCols,
       area: n,
@@ -312,6 +320,94 @@ const Analyzer = (() => {
       }
     }
     return necks;
+  }
+
+  /**
+   * แยกก้อนเม็ดติดกันด้วย distance-transform watershed:
+   *  1. คำนวณระยะห่างจากขอบ (chamfer 3-4) ภายในก้อน
+   *  2. หา "แกนกลาง" = บริเวณที่ระยะ ≥ 55% ของรัศมีเม็ดปกติ → marker แต่ละเม็ด
+   *  3. โตกลับจากทุก marker พร้อมกัน (multi-source BFS) → แบ่งพิกเซลเป็นรายเม็ด
+   * @returns array ของกลุ่มพิกเซล (global index) หรือ null ถ้าแยกไม่ได้
+   */
+  function watershedSplit(px, w, rNormalPx) {
+    let x0 = 1e9, y0 = 1e9, x1 = -1, y1 = -1;
+    for (const i of px) {
+      const x = i % w, y = (i / w) | 0;
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    const bw = x1 - x0 + 3, bh = y1 - y0 + 3; // กันขอบ 1 px
+    if (bw * bh > 4e6) return null;
+    const idx = (x, y) => y * bw + x;
+    const inM = new Uint8Array(bw * bh);
+    const d = new Float32Array(bw * bh);
+    const gmap = new Int32Array(bw * bh).fill(-1); // local → global
+    for (const i of px) {
+      const lx = (i % w) - x0 + 1, ly = ((i / w) | 0) - y0 + 1;
+      const k = idx(lx, ly);
+      inM[k] = 1; d[k] = 1e9; gmap[k] = i;
+    }
+    // chamfer 3-4 ไป-กลับ
+    for (let y = 1; y < bh; y++) {
+      for (let x = 1; x < bw; x++) {
+        const k = idx(x, y);
+        if (!inM[k]) continue;
+        let v = d[k];
+        if (d[k - 1] + 3 < v) v = d[k - 1] + 3;
+        if (d[k - bw] + 3 < v) v = d[k - bw] + 3;
+        if (d[k - bw - 1] + 4 < v) v = d[k - bw - 1] + 4;
+        if (x < bw - 1 && d[k - bw + 1] + 4 < v) v = d[k - bw + 1] + 4;
+        d[k] = v;
+      }
+    }
+    for (let y = bh - 2; y >= 0; y--) {
+      for (let x = bw - 2; x >= 0; x--) {
+        const k = idx(x, y);
+        if (!inM[k]) continue;
+        let v = d[k];
+        if (d[k + 1] + 3 < v) v = d[k + 1] + 3;
+        if (d[k + bw] + 3 < v) v = d[k + bw] + 3;
+        if (d[k + bw + 1] + 4 < v) v = d[k + bw + 1] + 4;
+        if (x > 0 && d[k + bw - 1] + 4 < v) v = d[k + bw - 1] + 4;
+        d[k] = v;
+      }
+    }
+    // markers = แกนกลางที่ลึกพอ
+    const thresh = Math.max(5, rNormalPx * 0.55 * 3);
+    const lbl = new Int32Array(bw * bh);
+    let nMarkers = 0;
+    const queue = new Int32Array(bw * bh);
+    for (let k = 0; k < inM.length; k++) {
+      if (!inM[k] || d[k] < thresh || lbl[k]) continue;
+      nMarkers++;
+      let qh = 0, qt = 0;
+      queue[qt++] = k; lbl[k] = nMarkers;
+      while (qh < qt) {
+        const c = queue[qh++];
+        for (const nb of [c - 1, c + 1, c - bw, c + bw]) {
+          if (nb >= 0 && nb < inM.length && inM[nb] && d[nb] >= thresh && !lbl[nb]) {
+            lbl[nb] = nMarkers; queue[qt++] = nb;
+          }
+        }
+      }
+    }
+    if (nMarkers < 2) return null;
+    // โตกลับพร้อมกันทุก marker
+    let qh = 0, qt = 0;
+    for (let k = 0; k < inM.length; k++) if (lbl[k]) queue[qt++] = k;
+    while (qh < qt) {
+      const c = queue[qh++];
+      for (const nb of [c - 1, c + 1, c - bw, c + bw]) {
+        if (nb >= 0 && nb < inM.length && inM[nb] && !lbl[nb]) {
+          lbl[nb] = lbl[c]; queue[qt++] = nb;
+        }
+      }
+    }
+    const groups = Array.from({ length: nMarkers }, () => []);
+    for (let k = 0; k < inM.length; k++) {
+      if (inM[k] && lbl[k]) groups[lbl[k] - 1].push(gmap[k]);
+    }
+    return groups;
   }
 
   /**
@@ -362,7 +458,7 @@ const Analyzer = (() => {
     const minAreaPx = Math.max(20, (minLenMm * minLenMm * 0.4) / (mmpp * mmpp));
     const labels = new Int32Array(w * h);
     const stack = new Int32Array(w * h);
-    const accepted = [], rejectedBoxes = [];
+    const accepted = [], rejectedBoxes = [], pendingBig = [];
     let nextLabel = 0, rejectedCount = 0, splitCount = 0;
 
     for (let start = 0; start < mask.length; start++) {
@@ -425,12 +521,83 @@ const Analyzer = (() => {
         // solidity กรอง noise รูปร่างผิดปกติ
         const solidity = f.area / (f.lengthPx * Math.max(1, f.diaPx));
         if (lenMm < minLenMm || solidity < 0.4) continue;
-        if (lenMm > maxLenMm || (finals === parts ? false : touchBorder)) {
+        if (finals.length === 1 && touchBorder) {
           rejectedCount++; rejectedBoxes.push(f); continue;
         }
-        f.texture = textureMetrics(f.px, w, data);
+        if (lenMm > maxLenMm) { pendingBig.push(f); continue; }
         accepted.push(f);
       }
+    }
+
+    // ---- ขั้นที่ 2: watershed แยกก้อนที่ยังติดกัน (เคียงข้าง/เกาะกลุ่ม) ----
+    // ใช้ distance transform หา "แกนกลาง" ของแต่ละเม็ดในก้อน แล้วโตกลับออกมาเป็นรายเม็ด
+    if (autoSplit && accepted.length >= 3) {
+      const medDiaPx = median(accepted.map(a => a.diaPx));
+      const medArea = median(accepted.map(a => a.area));
+      const suspects = pendingBig.splice(0);
+      // ก้อนที่ "อ้วน" ผิดปกติใน accepted = น่าจะเป็นเม็ดติดกันแบบเคียงข้าง
+      for (let i = accepted.length - 1; i >= 0; i--) {
+        const a = accepted[i];
+        if (a.diaPx > 1.55 * medDiaPx && a.area > 1.6 * medArea) {
+          suspects.push(a);
+          accepted.splice(i, 1);
+        }
+      }
+      // ตรวจรับชิ้นส่วนที่แยกแล้ว: ขนาดต้องสมเหตุสมผลเทียบเม็ดปกติ
+      const validateGroups = (groups) => {
+        const out = [];
+        if (!groups) return out;
+        for (const g of groups) {
+          if (g.length < minAreaPx) continue;
+          const pm = measureComponent(g, w, data);
+          pm.px = g;
+          let lenMm = pm.lengthPx * mmpp, diaMm = pm.diaPx * mmpp;
+          if (lenMm < diaMm) { const t2 = lenMm; lenMm = diaMm; diaMm = t2; }
+          pm.lenMm = lenMm; pm.diaMm = diaMm;
+          const sol = pm.area / (pm.lengthPx * Math.max(1, pm.diaPx));
+          if (lenMm >= minLenMm && lenMm <= maxLenMm && sol >= 0.4 && pm.diaPx <= 1.45 * medDiaPx) {
+            out.push(pm);
+          }
+        }
+        return out;
+      };
+      // ชั้นที่ 3: แบ่งเชิงเรขาคณิต — Ø ของก้อน ≈ k เท่าของเม็ดปกติ → ผ่าตามแกนยาวเป็น k แถบ
+      const bandGroups = (blob, k) => {
+        const groups = Array.from({ length: k }, () => []);
+        const span = (blob.vMax - blob.vMin + 1) / k;
+        for (const i of blob.px) {
+          const dx = (i % w) - blob.mx, dy = ((i / w) | 0) - blob.my;
+          const v = -dx * blob.sinT + dy * blob.cosT;
+          let b = Math.floor((v - blob.vMin) / span);
+          groups[Math.max(0, Math.min(k - 1, b))].push(i);
+        }
+        return groups;
+      };
+
+      for (const blob of suspects) {
+        let parts = validateGroups(watershedSplit(blob.px, w, medDiaPx / 2));
+        if (parts.length < 2) {
+          const k = Math.round(blob.diaPx / medDiaPx);
+          if (k >= 2 && Math.abs(blob.diaPx - k * medDiaPx) <= 0.4 * medDiaPx) {
+            parts = validateGroups(bandGroups(blob, k));
+          }
+        }
+        if (parts.length >= 2) {
+          splitCount += parts.length - 1;
+          accepted.push(...parts);
+        } else if (blob.lenMm > maxLenMm) {
+          rejectedCount++; rejectedBoxes.push(blob);
+        } else {
+          accepted.push(blob); // เม็ดอ้วนจริง ไม่ใช่เม็ดติดกัน
+        }
+      }
+    } else {
+      for (const b of pendingBig) { rejectedCount++; rejectedBoxes.push(b); }
+      pendingBig.length = 0;
+    }
+
+    for (const f of accepted) {
+      if (!f.texture) f.texture = textureMetrics(f.px, w, data);
     }
 
     // ---- วาดผล ----
@@ -558,8 +725,15 @@ const Analyzer = (() => {
       };
     }
 
+    // หน้าตัดเม็ด (สมมติทรงกระบอก): A = π·d²/4 ต่อเม็ด
+    const areas = dias.map(d => Math.PI * d * d / 4);
+    const avgArea = mean(areas);
+
     return {
       texture,
+      avg_area_mm2: +avgArea.toFixed(3),
+      sd_area_mm2: +sd(areas, avgArea).toFixed(3),
+      cv_pct: avgLen > 0 ? +((sd(lens, avgLen) / avgLen) * 100).toFixed(1) : 0,
       count: n,
       avg_length_mm: +avgLen.toFixed(2),
       sd_length_mm: +sd(lens, avgLen).toFixed(2),
