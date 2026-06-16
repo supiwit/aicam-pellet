@@ -628,7 +628,8 @@
 
   function renderPelletTable(pellets) {
     $('tbl-pellets').querySelector('tbody').innerHTML = pellets.map((p, i) =>
-      `<tr><td>${i + 1}</td><td>${p.length_mm.toFixed(1)}</td><td>${p.diameter_mm.toFixed(2)}</td>
+      `<tr><td>${i + 1}${p.from_split ? ' <span title="แยกจากเม็ดติดกัน" style="color:#0891b2">✂</span>' : ''}</td>
+       <td>${p.length_mm.toFixed(1)}</td><td>${p.diameter_mm.toFixed(2)}</td>
        <td><span class="dot" style="background:rgb(${p.color.r},${p.color.g},${p.color.b})"></span></td></tr>`
     ).join('');
   }

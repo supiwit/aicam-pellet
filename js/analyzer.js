@@ -261,9 +261,11 @@ const Analyzer = (() => {
     const colMin = new Float32Array(nCols).fill(1e9);
     const colMax = new Float32Array(nCols).fill(-1e9);
     const colCnt = new Uint32Array(nCols);
+    const colSumV = new Float32Array(nCols);
     for (let k = 0; k < n; k++) {
       const c = Math.min(nCols - 1, Math.max(0, Math.round(us[k] - uMin)));
       colCnt[c]++;
+      colSumV[c] += vs[k];
       if (vs[k] < colMin[c]) colMin[c] = vs[k];
       if (vs[k] > colMax[c]) colMax[c] = vs[k];
     }
@@ -285,12 +287,38 @@ const Analyzer = (() => {
     }
 
     // ความยาวแบบ robust: ตัด outlier 0.4% หัวท้าย กันพิกเซลหลุด/เงาแหลม
-    let lengthPx = uMax - uMin + 1;
+    let straightLen = uMax - uMin + 1;
     if (n > 50) {
       const su = Float32Array.from(us).sort();
-      lengthPx = su[Math.min(n - 1, Math.ceil(0.996 * (n - 1)))] -
-                 su[Math.max(0, Math.floor(0.004 * (n - 1)))] + 1;
+      straightLen = su[Math.min(n - 1, Math.ceil(0.996 * (n - 1)))] -
+                    su[Math.max(0, Math.floor(0.004 * (n - 1)))] + 1;
     }
+
+    // ความยาวแบบ curvature-aware: เดินตามแกนกลางเม็ด (centroid ต่อคอลัมน์)
+    // → วัดเม็ดที่โค้งงอได้ตามจริง ไม่ใช่แค่ระยะตรงปลายถึงปลาย
+    let pathLen = straightLen;
+    {
+      const cx = [], cv = [];
+      for (let c = 0; c < nCols; c++) {
+        if (colCnt[c] > 0) { cx.push(c); cv.push(colSumV[c] / colCnt[c]); }
+      }
+      if (cx.length >= 4) {
+        // smooth แกนกลางด้วยค่าเฉลี่ยเคลื่อนที่หน้าต่าง 5 กันสัญญาณรบกวนพองค่า
+        const sv = cv.map((_, i) => {
+          let s = 0, c = 0;
+          for (let j = Math.max(0, i - 2); j <= Math.min(cv.length - 1, i + 2); j++) { s += cv[j]; c++; }
+          return s / c;
+        });
+        let p = 0;
+        for (let i = 1; i < cx.length; i++) {
+          const du = cx[i] - cx[i - 1], dv = sv[i] - sv[i - 1];
+          p += Math.sqrt(du * du + dv * dv);
+        }
+        pathLen = p + 1; // +1 ครอบคลุมพิกเซลปลายทั้งสอง
+      }
+    }
+    // เม็ดตรง pathLen≈straightLen; เม็ดโค้ง pathLen>straightLen → เลือกค่ามากกว่า
+    const lengthPx = Math.max(straightLen, pathLen);
 
     return {
       roughnessPct,
@@ -305,21 +333,55 @@ const Analyzer = (() => {
   }
 
   /**
-   * หา "คอคอด" ในโปรไฟล์ความกว้าง — จุดที่ความกว้างยุบลึกกว่า 55% ของ median
+   * หา "คอคอด" ในโปรไฟล์ความกว้าง — จุดที่ความกว้างยุบลึกกว่า ratio ของ median
    * คืนตำแหน่งคอลัมน์ที่ควรตัดแยก (เม็ดติดกันแบบหัวต่อหัว)
    */
-  function findNecks(m, minColsPerPart) {
+  function findNecks(m, minColsPerPart, ratio = 0.55) {
     const W = median(m.widths.filter(v => v > 0));
     if (!W) return [];
     const sm = m.widths.map((v, i, a) =>
       (a[i - 1] ?? v) * 0.25 + v * 0.5 + (a[i + 1] ?? v) * 0.25);
     const necks = [];
     for (let c = minColsPerPart; c < m.nCols - minColsPerPart; c++) {
-      if (sm[c] < W * 0.55 && sm[c] <= sm[c - 1] && sm[c] <= sm[c + 1]) {
+      if (sm[c] < W * ratio && sm[c] <= sm[c - 1] && sm[c] <= sm[c + 1]) {
         if (!necks.length || c - necks[necks.length - 1] >= minColsPerPart) necks.push(c);
       }
     }
     return necks;
+  }
+
+  /** แบ่งพิกเซลของก้อนตามคอคอด → คืน array ของกลุ่มพิกเซล (global index) หรือ null */
+  function neckSplitGroups(m, w, minColsPerPart, ratio = 0.55) {
+    const necks = findNecks(m, minColsPerPart, ratio);
+    if (!necks.length) return null;
+    const groups = Array.from({ length: necks.length + 1 }, () => []);
+    for (const i of m.px) {
+      const dx = (i % w) - m.mx, dy = ((i / w) | 0) - m.my;
+      const u = dx * m.cosT + dy * m.sinT;
+      const c = Math.round(u - m.uMin);
+      let g = 0;
+      while (g < necks.length && c > necks[g]) g++;
+      groups[g].push(i);
+    }
+    return groups;
+  }
+
+  /**
+   * แบ่งเชิงเรขาคณิต: ผ่าก้อนตามแกน "เรียงเม็ด" เป็น k แถบเท่าๆ กัน
+   * (เม็ดเคียงข้างชิดสนิทไร้คอคอด) — alongV=true ผ่าตามแกนรอง, false ผ่าตามแกนหลัก
+   */
+  function bandGroups(blob, w, k, alongV = true) {
+    const groups = Array.from({ length: k }, () => []);
+    const lo = alongV ? blob.vMin : blob.uMin;
+    const hi = alongV ? blob.vMax : blob.uMax;
+    const span = (hi - lo + 1) / k;
+    for (const i of blob.px) {
+      const dx = (i % w) - blob.mx, dy = ((i / w) | 0) - blob.my;
+      const coord = alongV ? (-dx * blob.sinT + dy * blob.cosT) : (dx * blob.cosT + dy * blob.sinT);
+      const b = Math.floor((coord - lo) / span);
+      groups[Math.max(0, Math.min(k - 1, b))].push(i);
+    }
+    return groups;
   }
 
   /**
@@ -372,26 +434,45 @@ const Analyzer = (() => {
         d[k] = v;
       }
     }
-    // markers = แกนกลางที่ลึกพอ
-    const thresh = Math.max(5, rNormalPx * 0.55 * 3);
+    // ---- markers = local maxima ของ distance transform + non-max suppression ----
+    // ให้ได้ "1 จุดศูนย์กลาง = 1 เม็ด" เสมอ แม่นกับคลัสเตอร์เคียงข้าง/3+ เม็ด
+    const dmin = Math.max(4, rNormalPx * 0.5 * 3);   // ลึกขั้นต่ำที่ถือเป็นใจกลางเม็ด (หน่วย chamfer)
+    const win = Math.max(1, Math.round(rNormalPx * 0.6)); // หน้าต่าง local-max
+    const minSeedDist = Math.max(3, rNormalPx * 1.3); // ระยะห่างขั้นต่ำระหว่างศูนย์กลางเม็ด (px)
+    const cand = [];
+    for (let y = 1; y < bh - 1; y++) {
+      for (let x = 1; x < bw - 1; x++) {
+        const k = idx(x, y);
+        if (!inM[k] || d[k] < dmin) continue;
+        let isMax = true;
+        for (let dy = -win; dy <= win && isMax; dy++) {
+          for (let dx = -win; dx <= win; dx++) {
+            const xx = x + dx, yy = y + dy;
+            if (xx < 0 || yy < 0 || xx >= bw || yy >= bh) continue;
+            if (d[idx(xx, yy)] > d[k]) { isMax = false; break; }
+          }
+        }
+        if (isMax) cand.push(k);
+      }
+    }
+    // NMS: เรียงตามความลึกมาก→น้อย รับ seed ที่ห่างจากที่รับแล้ว ≥ minSeedDist
+    cand.sort((a, b) => d[b] - d[a]);
+    const seeds = [];
+    for (const k of cand) {
+      const x = k % bw, y = (k / bw) | 0;
+      let ok = true;
+      for (const s of seeds) {
+        const sx = s % bw, sy = (s / bw) | 0;
+        if (Math.hypot(x - sx, y - sy) < minSeedDist) { ok = false; break; }
+      }
+      if (ok) seeds.push(k);
+    }
+    if (seeds.length < 2) return null;
+
     const lbl = new Int32Array(bw * bh);
     let nMarkers = 0;
     const queue = new Int32Array(bw * bh);
-    for (let k = 0; k < inM.length; k++) {
-      if (!inM[k] || d[k] < thresh || lbl[k]) continue;
-      nMarkers++;
-      let qh = 0, qt = 0;
-      queue[qt++] = k; lbl[k] = nMarkers;
-      while (qh < qt) {
-        const c = queue[qh++];
-        for (const nb of [c - 1, c + 1, c - bw, c + bw]) {
-          if (nb >= 0 && nb < inM.length && inM[nb] && d[nb] >= thresh && !lbl[nb]) {
-            lbl[nb] = nMarkers; queue[qt++] = nb;
-          }
-        }
-      }
-    }
-    if (nMarkers < 2) return null;
+    for (const k of seeds) lbl[k] = ++nMarkers;
     // โตกลับพร้อมกันทุก marker
     let qh = 0, qt = 0;
     for (let k = 0; k < inM.length; k++) if (lbl[k]) queue[qt++] = k;
@@ -408,6 +489,77 @@ const Analyzer = (() => {
       if (inM[k] && lbl[k]) groups[lbl[k] - 1].push(gmap[k]);
     }
     return groups;
+  }
+
+  /**
+   * แยกก้อนเม็ดติดกันแบบ recursive รองรับคลัสเตอร์ผสม (เคียงข้าง + หัวต่อหัว):
+   *  - ก้อน "อ้วน" (เคียงข้าง/เกาะกลุ่ม) → watershed ด้วย local-maxima markers
+   *  - ก้อนมี "คอคอด" (หัวต่อหัว) → neck split
+   *  - เคียงข้างชิดสนิทไร้คอคอด → band split
+   *  - แต่ละชิ้นที่ได้ ถ้ายังใหญ่ → แยกซ้ำ (สูงสุด 3 ชั้น)
+   * ปลอดภัย: ถ้าแยกไม่สมเหตุสมผลจะคืนก้อนเดิม (ไม่สร้างการแยกเทียม)
+   * @returns array ของเม็ดที่วัดแล้ว (≥1 ชิ้น); ชิ้นที่มาจากการแยกมี fromSplit=true
+   */
+  function refineBlob(blob, w, data, mmpp, cfg) {
+    const { minLenMm, maxLenMm, minAreaPx, medDiaPx, medArea, medLenPx } = cfg;
+    const measure = (g) => {
+      const pm = measureComponent(g, w, data);
+      pm.px = g;
+      let l = pm.lengthPx * mmpp, d = pm.diaPx * mmpp;
+      if (l < d) { const t = l; l = d; d = t; }
+      pm.lenMm = l; pm.diaMm = d;
+      return pm;
+    };
+    const valid = (pm) =>
+      pm.area >= minAreaPx && pm.lenMm >= minLenMm && pm.lenMm <= maxLenMm &&
+      (pm.area / (pm.lengthPx * Math.max(1, pm.diaPx))) >= 0.4 &&
+      pm.diaPx <= 1.5 * medDiaPx;
+    const minCols = Math.max(4, (minLenMm / mmpp) * 0.8);
+
+    const toParts = (groups) => groups
+      ? groups.filter(x => x.length >= minAreaPx).map(measure).filter(valid)
+      : [];
+
+    function split(pm, depth) {
+      if (depth >= 3) return [pm];
+      const uExt = pm.uMax - pm.uMin + 1, vExt = pm.vMax - pm.vMin + 1;
+      // แกน "เรียงเม็ด" (stacking) = แกนที่ extent ห่างจากความยาวเม็ดปกติมากกว่า
+      const stackAlongV = Math.abs(uExt - medLenPx) <= Math.abs(vExt - medLenPx);
+      const stackExt = stackAlongV ? vExt : uExt;
+      const kStack = Math.round(stackExt / medDiaPx);
+      const isFat = stackExt > 1.4 * medDiaPx;            // มีเม็ดเรียงกันมากกว่า 1 ตามแนวกว้าง
+      const expect = Math.max(2, Math.round(pm.area / medArea)); // จำนวนเม็ดคาดหวังจากพื้นที่
+
+      // รวบรวมผลจากทุกวิธีที่ใช้ได้ แล้วเลือกอันที่จำนวนชิ้นใกล้ค่าคาดหวังที่สุด
+      const cands = [];
+      if (isFat) {
+        const ws = toParts(watershedSplit(pm.px, w, medDiaPx / 2));
+        if (ws.length >= 2) cands.push(ws);
+        // band split: แพเม็ดขนานชิดกัน (extent แกนเรียง ≈ k เท่าของ Ø เม็ดปกติ)
+        if (kStack >= 2 && Math.abs(stackExt - kStack * medDiaPx) <= 0.6 * medDiaPx) {
+          const bd = toParts(bandGroups(pm, w, kStack, stackAlongV));
+          if (bd.length >= 2) cands.push(bd);
+        }
+      }
+      // neck split: หัวต่อหัว (มีคอคอดจริง)
+      const ng = toParts(neckSplitGroups(pm, w, minCols, 0.6));
+      if (ng.length >= 2) cands.push(ng);
+
+      if (!cands.length) return [pm];
+      // เลือก: |จำนวนชิ้น − คาดหวัง| น้อยสุด, เสมอกันเลือกชิ้นมากกว่า (แยกครบกว่า)
+      cands.sort((a, b) => {
+        const da = Math.abs(a.length - expect), db = Math.abs(b.length - expect);
+        return da !== db ? da - db : b.length - a.length;
+      });
+
+      const out = [];
+      for (const p of cands[0]) {
+        const sub = split(p, depth + 1);
+        for (const s of sub) { s.fromSplit = true; out.push(s); }
+      }
+      return out;
+    }
+    return split(blob, 0);
   }
 
   /**
@@ -505,6 +657,7 @@ const Analyzer = (() => {
             if (g.length >= minAreaPx) {
               const pm = measureComponent(g, w, data);
               pm.px = g;
+              pm.fromSplit = true;
               parts.push(pm);
             }
           }
@@ -529,66 +682,31 @@ const Analyzer = (() => {
       }
     }
 
-    // ---- ขั้นที่ 2: watershed แยกก้อนที่ยังติดกัน (เคียงข้าง/เกาะกลุ่ม) ----
-    // ใช้ distance transform หา "แกนกลาง" ของแต่ละเม็ดในก้อน แล้วโตกลับออกมาเป็นรายเม็ด
+    // ---- ขั้นที่ 2: แยกก้อนที่ยังติดกัน (เคียงข้าง/เกาะกลุ่ม/คลัสเตอร์ผสม) ----
+    // ใช้ refineBlob (watershed + neck + band แบบ recursive) กับก้อนที่ต้องสงสัย
     if (autoSplit && accepted.length >= 3) {
       const medDiaPx = median(accepted.map(a => a.diaPx));
       const medArea = median(accepted.map(a => a.area));
+      const medLenPx = median(accepted.map(a => a.lengthPx));
+      const cfg = { minLenMm, maxLenMm, minAreaPx, medDiaPx, medArea, medLenPx };
       const suspects = pendingBig.splice(0);
-      // ก้อนที่ "อ้วน" ผิดปกติใน accepted = น่าจะเป็นเม็ดติดกันแบบเคียงข้าง
+      // ดึงก้อนที่ "อ้วน" หรือ "พื้นที่ใหญ่ผิดปกติ" ออกจาก accepted มาแยกซ้ำ
       for (let i = accepted.length - 1; i >= 0; i--) {
         const a = accepted[i];
-        if (a.diaPx > 1.55 * medDiaPx && a.area > 1.6 * medArea) {
-          suspects.push(a);
-          accepted.splice(i, 1);
-        }
+        const fat = a.diaPx > 1.5 * medDiaPx && a.area > 1.5 * medArea;
+        const big = a.area > 1.7 * medArea && a.lengthPx > 1.5 * medLenPx;
+        if (fat || big) { suspects.push(a); accepted.splice(i, 1); }
       }
-      // ตรวจรับชิ้นส่วนที่แยกแล้ว: ขนาดต้องสมเหตุสมผลเทียบเม็ดปกติ
-      const validateGroups = (groups) => {
-        const out = [];
-        if (!groups) return out;
-        for (const g of groups) {
-          if (g.length < minAreaPx) continue;
-          const pm = measureComponent(g, w, data);
-          pm.px = g;
-          let lenMm = pm.lengthPx * mmpp, diaMm = pm.diaPx * mmpp;
-          if (lenMm < diaMm) { const t2 = lenMm; lenMm = diaMm; diaMm = t2; }
-          pm.lenMm = lenMm; pm.diaMm = diaMm;
-          const sol = pm.area / (pm.lengthPx * Math.max(1, pm.diaPx));
-          if (lenMm >= minLenMm && lenMm <= maxLenMm && sol >= 0.4 && pm.diaPx <= 1.45 * medDiaPx) {
-            out.push(pm);
-          }
-        }
-        return out;
-      };
-      // ชั้นที่ 3: แบ่งเชิงเรขาคณิต — Ø ของก้อน ≈ k เท่าของเม็ดปกติ → ผ่าตามแกนยาวเป็น k แถบ
-      const bandGroups = (blob, k) => {
-        const groups = Array.from({ length: k }, () => []);
-        const span = (blob.vMax - blob.vMin + 1) / k;
-        for (const i of blob.px) {
-          const dx = (i % w) - blob.mx, dy = ((i / w) | 0) - blob.my;
-          const v = -dx * blob.sinT + dy * blob.cosT;
-          let b = Math.floor((v - blob.vMin) / span);
-          groups[Math.max(0, Math.min(k - 1, b))].push(i);
-        }
-        return groups;
-      };
 
       for (const blob of suspects) {
-        let parts = validateGroups(watershedSplit(blob.px, w, medDiaPx / 2));
-        if (parts.length < 2) {
-          const k = Math.round(blob.diaPx / medDiaPx);
-          if (k >= 2 && Math.abs(blob.diaPx - k * medDiaPx) <= 0.4 * medDiaPx) {
-            parts = validateGroups(bandGroups(blob, k));
-          }
-        }
+        const parts = refineBlob(blob, w, data, mmpp, cfg);
         if (parts.length >= 2) {
           splitCount += parts.length - 1;
           accepted.push(...parts);
         } else if (blob.lenMm > maxLenMm) {
           rejectedCount++; rejectedBoxes.push(blob);
         } else {
-          accepted.push(blob); // เม็ดอ้วนจริง ไม่ใช่เม็ดติดกัน
+          accepted.push(blob); // เม็ดใหญ่จริง ไม่ใช่เม็ดติดกัน
         }
       }
     } else {
@@ -618,7 +736,8 @@ const Analyzer = (() => {
       octx.stroke();
       octx.restore();
     };
-    accepted.forEach(b => drawBox(b, '#facc15'));
+    // เม็ดปกติ = กรอบเหลือง · เม็ดที่ถูกแยกจากก้อนติดกัน = กรอบฟ้า (ตรวจสอบได้)
+    accepted.forEach(b => drawBox(b, b.fromSplit ? '#22d3ee' : '#facc15'));
     rejectedBoxes.forEach(b => drawBox(b, 'rgba(255,255,255,.45)'));
     octx.font = `bold ${Math.max(11, w / 85)}px sans-serif`;
     octx.fillStyle = '#4ade80';
@@ -638,6 +757,7 @@ const Analyzer = (() => {
         color: b.color,
         roughness_pct: b.roughnessPct,
         texture: b.texture,
+        from_split: !!b.fromSplit,
       })),
       rejected: rejectedCount,
       splits: splitCount,
