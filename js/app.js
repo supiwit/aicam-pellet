@@ -394,8 +394,8 @@
     set('st-cv', stats.cv_pct || 0, 1);
 
     const sp = $('split-note');
-    if (splits > 0) { sp.hidden = false; sp.textContent = '✂️ ' + t('split_note', { n: splits }); }
-    else sp.hidden = true;
+    sp.hidden = false;
+    sp.textContent = '📏 ' + t('split_note', {});
     const rj = $('rejected-note');
     if (rejected > 0) { rj.hidden = false; rj.textContent = '⚠️ ' + t('rejected_note', { n: rejected }); }
     else rj.hidden = true;
@@ -628,7 +628,7 @@
 
   function renderPelletTable(pellets) {
     $('tbl-pellets').querySelector('tbody').innerHTML = pellets.map((p, i) =>
-      `<tr><td>${i + 1}${p.from_split ? ' <span title="แยกจากเม็ดติดกัน" style="color:#0891b2">✂</span>' : ''}</td>
+      `<tr><td>${i + 1}</td>
        <td>${p.length_mm.toFixed(1)}</td><td>${p.diameter_mm.toFixed(2)}</td>
        <td><span class="dot" style="background:rgb(${p.color.r},${p.color.g},${p.color.b})"></span></td></tr>`
     ).join('');
