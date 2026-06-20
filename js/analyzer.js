@@ -360,6 +360,7 @@ const Analyzer = (() => {
 
     return {
       roughnessPct, solidity,
+      aspect: diaPx > 0 ? lengthPx / diaPx : 1,   // ISO 9276-6 elongation (ยาว/กว้าง)
       mx, my, cosT, sinT, uMin, uMax, vMin, vMax,
       lengthPx, diaPx,
       area: n,
@@ -446,12 +447,18 @@ const Analyzer = (() => {
     const medLen = median(ref.map(c => c.lenMm));
     const medArea = median(ref.map(c => c.area));
 
+    const maxAspect = opts.maxAspect ?? 8;   // เกินนี้ = เส้นใย/เศษ (ISO 9276-6 elongation)
     const accepted = [], rejectedBoxes = [];
-    let rejBorder = 0, rejClump = 0, rejSize = 0;
+    let rejBorder = 0, rejClump = 0, rejSize = 0, rejForeign = 0;
     for (const c of comps) {
       if (c.lenMm < minLenMm) continue;                 // เล็กเกิน = noise (ไม่นับ)
       if (c.touchBorder) { c.reason = 'border'; rejectedBoxes.push(c); rejBorder++; continue; }
       if (c.lenMm > maxLenMm) { c.reason = 'size'; rejectedBoxes.push(c); rejSize++; continue; }
+      // (4) กรองเศษ/สิ่งแปลกปลอมด้วยรูปทรง — เส้นใย/เส้นผม (ผอมยาวผิดปกติ)
+      //     หรือรูปร่างเว้ามาก (ไม่ใช่เม็ดอาหาร) ตาม ISO 9276-6
+      if (c.aspect > maxAspect || c.solidity < 0.55) {
+        c.reason = 'foreign'; rejectedBoxes.push(c); rejForeign++; continue;
+      }
       if (excludeClumps && ref.length >= 4) {
         const clump =
           (medArea > 0 && c.area > 1.5 * medArea) ||     // พื้นที่ ≈ 2 เม็ด = เม็ดติดกัน (ตัวจับหลัก)
@@ -484,8 +491,9 @@ const Analyzer = (() => {
       }
       octx.restore();
     };
-    // เม็ดที่วัด = กรอบเหลือง (แกนแดง) · เม็ดติดกันที่คัดออก = กรอบส้ม · ชนขอบ/ผิดขนาด = ขาวจาง
-    rejectedBoxes.forEach(b => drawBox(b, b.reason === 'clump' ? '#fb923c' : 'rgba(255,255,255,.4)', false));
+    // เม็ดที่วัด = กรอบเหลือง (แกนแดง) · เม็ดติดกัน = ส้ม · สิ่งแปลกปลอม = ม่วง · ชนขอบ/ผิดขนาด = ขาวจาง
+    const rejColor = { clump: '#fb923c', foreign: '#c084fc' };
+    rejectedBoxes.forEach(b => drawBox(b, rejColor[b.reason] || 'rgba(255,255,255,.4)', false));
     accepted.forEach(b => drawBox(b, '#facc15', true));
     octx.font = `bold ${Math.max(11, w / 85)}px sans-serif`;
     octx.fillStyle = '#4ade80';
@@ -505,10 +513,11 @@ const Analyzer = (() => {
         color: b.color,
         roughness_pct: b.roughnessPct,
         solidity: +b.solidity.toFixed(3),
+        aspect: +b.aspect.toFixed(2),
         texture: b.texture,
       })),
       rejected: rejectedBoxes.length,
-      excluded: { clump: rejClump, border: rejBorder, size: rejSize },
+      excluded: { clump: rejClump, border: rejBorder, size: rejSize, foreign: rejForeign },
       splits: 0,
       annotated: out,
       threshold: thr,

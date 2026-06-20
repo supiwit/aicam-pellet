@@ -34,6 +34,7 @@
     polarity: 'auto',
     minlen: 1,
     maxlen: 50,
+    maxaspect: 8,
     autosplit: true,
     refcolor: '#c8a464',
     userefcolor: false,
@@ -341,6 +342,7 @@
             polarity: settings.polarity,
             minLenMm: +settings.minlen,
             maxLenMm: +settings.maxlen,
+            maxAspect: +settings.maxaspect || 8,
             autoSplit: !!settings.autosplit,
           });
           const stats = Analyzer.computeStats(res.pellets, binsArray());
@@ -997,6 +999,7 @@
     $('s-polarity').value = settings.polarity;
     $('s-minlen').value = settings.minlen;
     $('s-maxlen').value = settings.maxlen;
+    $('s-maxaspect').value = settings.maxaspect;
     $('s-split').checked = !!settings.autosplit;
     $('s-refcolor').value = settings.refcolor;
     $('s-userefcolor').checked = settings.userefcolor;
@@ -1017,6 +1020,7 @@
       settings.polarity = $('s-polarity').value;
       settings.minlen = parseFloat($('s-minlen').value) || DEFAULTS.minlen;
       settings.maxlen = parseFloat($('s-maxlen').value) || DEFAULTS.maxlen;
+      settings.maxaspect = parseFloat($('s-maxaspect').value) || DEFAULTS.maxaspect;
       settings.autosplit = $('s-split').checked;
       settings.refcolor = $('s-refcolor').value;
       settings.userefcolor = $('s-userefcolor').checked;
