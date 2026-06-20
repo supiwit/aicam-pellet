@@ -31,7 +31,7 @@
   const FACTORIES = [
     { id: 'ben-tre', th: 'เบ๊นแจ (Bến Tre)', vi: 'Bến Tre', en: 'Bến Tre' },
     { id: 'ca-mau',  th: 'ก่าเมา (Cà Mau)',  vi: 'Cà Mau',  en: 'Cà Mau' },
-    { id: 'bac-lieu', th: 'บ่ากเลียว (Bạc Liêu)', vi: 'Bạc Liêu', en: 'Bạc Liêu' },
+    { id: 'bau-xeo', th: 'บ่าวแซว (Bàu Xéo)', vi: 'Bàu Xéo', en: 'Bàu Xéo' },
   ];
   const factoryName = id => {
     const f = FACTORIES.find(x => x.id === id);

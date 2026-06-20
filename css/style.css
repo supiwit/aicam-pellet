@@ -46,7 +46,8 @@ body {
   animation: popIn .5s cubic-bezier(.2,.9,.3,1.2) both;
 }
 .lock-logo { animation: float 3.5s ease-in-out infinite; margin-bottom: 6px; }
-.lock-ring { stroke-dasharray: 340; stroke-dashoffset: 340; animation: dashRing 1.2s ease forwards .2s; }
+.cp-mark { border-radius: 22px; box-shadow: 0 8px 26px rgba(0,0,0,.28); }
+.lock-ring { stroke-dasharray: 460; stroke-dashoffset: 460; animation: dashRing 1.2s ease forwards .2s; }
 .lock-pellets rect { opacity: 0; animation: popIn .4s ease forwards; }
 .lock-pellets rect:nth-child(1) { animation-delay: .5s; }
 .lock-pellets rect:nth-child(2) { animation-delay: .7s; }
