@@ -17,16 +17,45 @@
     lastSavedId: null,
     charts: {},
     appStarted: false,
+    currentUser: null,   // ข้อ 7
   };
 
   /* ---------------- settings ---------------- */
+  // ชนิดสัตว์/สายผลิตภัณฑ์ (ข้อ 9) — สเปกแยกตาม product
+  const PRODUCTS = [
+    { id: 'shrimp', th: 'อาหารกุ้ง', vi: 'Thức ăn tôm', en: 'Shrimp feed' },
+    { id: 'fish', th: 'อาหารปลา', vi: 'Thức ăn cá', en: 'Fish feed' },
+    { id: 'other', th: 'อื่นๆ', vi: 'Khác', en: 'Other' },
+  ];
+  const productName = id => { const p = PRODUCTS.find(x => x.id === id); return p ? (p[I18N.lang] || p.en) : (id || ''); };
+
+  // กะการผลิต (ข้อ 6)
+  const SHIFTS = [
+    { id: '', th: '— ไม่ระบุกะ —', vi: '— Không chọn ca —', en: '— No shift —' },
+    { id: 'A', th: 'กะเช้า (A)', vi: 'Ca sáng (A)', en: 'Morning (A)' },
+    { id: 'B', th: 'กะบ่าย (B)', vi: 'Ca chiều (B)', en: 'Afternoon (B)' },
+    { id: 'C', th: 'กะดึก (C)', vi: 'Ca đêm (C)', en: 'Night (C)' },
+  ];
+  const shiftName = id => { const s = SHIFTS.find(x => x.id === id); return s ? (s[I18N.lang] || s.en) : (id || ''); };
+
+  // วัตถุอ้างอิงสำหรับคาลิเบรตอัตโนมัติ (ข้อ 1) — เส้นผ่านศูนย์กลางจริง (มม.)
+  const REF_OBJECTS = [
+    { id: 'coin1', mm: 20.0, th: 'เหรียญ 1 บาท (Ø20.0)', vi: 'Xu (Ø20.0)', en: 'Coin Ø20.0' },
+    { id: 'coin5', mm: 24.0, th: 'เหรียญ 5 บาท (Ø24.0)', vi: 'Xu (Ø24.0)', en: 'Coin Ø24.0' },
+    { id: 'coin10', mm: 26.0, th: 'เหรียญ 10 บาท (Ø26.0)', vi: 'Xu (Ø26.0)', en: 'Coin Ø26.0' },
+    { id: 'card', mm: 85.6, th: 'บัตร ATM/เครดิต (85.6)', vi: 'Thẻ ATM (85.6)', en: 'ATM/credit card (85.6)' },
+  ];
+  const refName = id => { const r = REF_OBJECTS.find(x => x.id === id); return r ? (r[I18N.lang] || r.en) : id; };
+
   // sieve_under / sieve_over = ช่องตะแกรง mesh (มม.) สำหรับร่อน undersize/oversize · yield_target = % เป้าหมาย
   const DEFAULT_SPECS = [
-    { die: '1.0', min_mm: 1.0, max_mm: 2.0, target_pct: 60, sieve_under: 0.71, sieve_over: 1.40, yield_target: 95 },
-    { die: '1.2', min_mm: 1.5, max_mm: 2.5, target_pct: 60, sieve_under: 0.85, sieve_over: 1.70, yield_target: 95 },
-    { die: '1.4', min_mm: 2.0, max_mm: 3.0, target_pct: 60, sieve_under: 1.00, sieve_over: 2.00, yield_target: 95 },
-    { die: '1.8', min_mm: 2.0, max_mm: 3.0, target_pct: 60, sieve_under: 1.40, sieve_over: 2.50, yield_target: 95 },
-    { die: '2.0', min_mm: 3.0, max_mm: 4.0, target_pct: 60, sieve_under: 1.60, sieve_over: 2.80, yield_target: 95 },
+    { product: 'shrimp', die: '1.0', min_mm: 1.0, max_mm: 2.0, target_pct: 60, sieve_under: 0.71, sieve_over: 1.40, yield_target: 95 },
+    { product: 'shrimp', die: '1.2', min_mm: 1.5, max_mm: 2.5, target_pct: 60, sieve_under: 0.85, sieve_over: 1.70, yield_target: 95 },
+    { product: 'shrimp', die: '1.4', min_mm: 2.0, max_mm: 3.0, target_pct: 60, sieve_under: 1.00, sieve_over: 2.00, yield_target: 95 },
+    { product: 'shrimp', die: '1.8', min_mm: 2.0, max_mm: 3.0, target_pct: 60, sieve_under: 1.40, sieve_over: 2.50, yield_target: 95 },
+    { product: 'shrimp', die: '2.0', min_mm: 3.0, max_mm: 4.0, target_pct: 60, sieve_under: 1.60, sieve_over: 2.80, yield_target: 95 },
+    { product: 'fish', die: '2.5', min_mm: 3.0, max_mm: 5.0, target_pct: 70, sieve_under: 2.00, sieve_over: 3.35, yield_target: 95 },
+    { product: 'fish', die: '4.0', min_mm: 5.0, max_mm: 8.0, target_pct: 70, sieve_under: 3.35, sieve_over: 5.60, yield_target: 95 },
   ];
   // เติมค่าตะแกรง mesh เริ่มต้นให้สเปกเก่าที่ยังไม่มี (อิงเส้นผ่านศูนย์กลาง die)
   function fillSieveDefaults(s) {
@@ -34,6 +63,7 @@
     if (!(s.sieve_under > 0)) s.sieve_under = +(d * 0.72).toFixed(2);
     if (!(s.sieve_over > 0)) s.sieve_over = +(d * 1.4).toFixed(2);
     if (!(s.yield_target > 0)) s.yield_target = 95;
+    if (!s.product) s.product = 'shrimp';
     return s;
   }
 
@@ -89,9 +119,13 @@
     pin: '1234',
     die: 'auto',
     factory: 'ben-tre',
+    product: 'shrimp',
+    shift: '',
+    refObject: 'coin1',
     theme: '#1b6e5a',
     reportFactory: '',
     sieveUnit: 'mm',   // 'mm' หรือ 'mesh'
+    users: [{ name: 'Admin', pin: '1234', role: 'admin' }],  // ข้อ 7: ผู้ใช้ + สิทธิ์
     specs: DEFAULT_SPECS,
   };
   const stored = JSON.parse(localStorage.getItem('aicam-settings') || '{}');
@@ -100,6 +134,10 @@
   settings.specs.forEach(fillSieveDefaults); // เติมค่าตะแกรง mesh ให้สเปกเก่า
   // ปรับค่าเริ่มต้น Yield 90 → 95 (ครั้งเดียว)
   if (!settings.yieldV95) { settings.specs.forEach(s => { if (s.yield_target === 90) s.yield_target = 95; }); settings.yieldV95 = true; }
+  // ผู้ใช้ (ข้อ 7): ถ้ายังไม่มีรายชื่อ สร้างจาก PIN เดิม
+  if (!Array.isArray(settings.users) || !settings.users.length) {
+    settings.users = [{ name: 'Admin', pin: String(settings.pin || '1234'), role: 'admin' }];
+  }
   // ย้ายหน่วยช่วงความยาวจาก ซม. เป็น มม. (ครั้งเดียว เฉพาะค่าเก่าที่บันทึกไว้เป็น ซม.)
   if (stored.bins && stored.binsUnit !== 'mm') {
     settings.bins = stored.bins.split(',')
@@ -114,13 +152,16 @@
   function binsArray() {
     return settings.bins.split(',').map(s => parseFloat(s.trim())).filter(v => !isNaN(v) && v > 0);
   }
+  function specsForProduct() {
+    return settings.specs.filter(s => (s.product || 'shrimp') === settings.product);
+  }
   function currentSpec() {
-    return settings.specs.find(s => String(s.die) === String(settings.die)) || null;
+    return specsForProduct().find(s => String(s.die) === String(settings.die)) || null;
   }
 
   /** เลือกสเปกอัตโนมัติ: Die ที่ Ø ใกล้ Ø เฉลี่ยที่วัดได้ที่สุด (เสมอกัน → ตัวที่ Insize สูงกว่า) */
   function autoDetectSpec(pellets, stats) {
-    const cands = settings.specs.filter(s => !isNaN(parseFloat(s.die)) && s.max_mm > 0);
+    const cands = specsForProduct().filter(s => !isNaN(parseFloat(s.die)) && s.max_mm > 0);
     if (!cands.length || !stats.count) return null;
     const d = stats.avg_diameter_mm;
     const sorted = cands.slice().sort((a, b) =>
@@ -200,19 +241,41 @@
     toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
   }
 
-  /* ================= LOCK SCREEN ================= */
+  /* ================= LOCK SCREEN + ผู้ใช้ (ข้อ 7) ================= */
+  function findUserByPin(pin) {
+    return (settings.users || []).find(u => String(u.pin) === String(pin)) || null;
+  }
+  function setCurrentUser(u) {
+    state.currentUser = u;
+    sessionStorage.setItem('aicam-user', JSON.stringify(u));
+  }
+  function isAdmin() { return state.currentUser && state.currentUser.role === 'admin'; }
   function isUnlocked() {
+    if (!state.currentUser) {
+      const su = sessionStorage.getItem('aicam-user');
+      if (su) try { state.currentUser = JSON.parse(su); } catch (e) {}
+    }
     if (sessionStorage.getItem('aicam-unlocked') === '1') return true;
     const until = +localStorage.getItem('aicam-unlock-until') || 0;
-    return Date.now() < until;
+    if (Date.now() < until) {
+      if (!state.currentUser) {
+        const su = localStorage.getItem('aicam-user-remember');
+        if (su) try { state.currentUser = JSON.parse(su); } catch (e) {}
+      }
+      return true;
+    }
+    return false;
   }
 
   function tryUnlock() {
     const input = $('lock-input');
-    if (input.value === String(settings.pin)) {
+    const u = findUserByPin(input.value);
+    if (u) {
       sessionStorage.setItem('aicam-unlocked', '1');
+      setCurrentUser(u);
       if ($('lock-remember').checked) {
         localStorage.setItem('aicam-unlock-until', String(Date.now() + 7 * 864e5));
+        localStorage.setItem('aicam-user-remember', JSON.stringify(u));
       }
       input.value = '';
       showApp();
@@ -259,8 +322,15 @@
     initReports();
     initSettings();
     syncSettingsForm();
+    populateProductSelect();
     populateDieSelect();
     populateFactorySelect();
+    populateShiftSelect();
+    populateRefSelect();
+    initAutoCal();
+    applyRole();
+    updateUserBadge();
+    syncOfflineBadge();
     updateCalibStatus();
     checkNet();
 
@@ -294,19 +364,75 @@
   function onLangChange() {
     $('lang-select').value = I18N.lang;
     updateCalibStatus();
+    populateProductSelect();
     populateDieSelect();
     populateFactorySelect();
+    populateShiftSelect();
+    populateRefSelect();
     renderSpecEditor();
     if (state.results) renderResults(false);
   }
 
-  /* ---------------- โรงงาน ---------------- */
+  /* ---------------- โรงงาน / ชนิดอาหาร / กะ / วัตถุอ้างอิง ---------------- */
   function populateFactorySelect() {
     const sel = $('factory-select');
     if (!sel) return;
     sel.innerHTML = FACTORIES.map(f => `<option value="${f.id}">${factoryName(f.id)}</option>`).join('');
     sel.value = settings.factory || FACTORIES[0].id;
     sel.onchange = () => { settings.factory = sel.value; saveSettings(); };
+  }
+  function populateProductSelect() {
+    const sel = $('product-select');
+    if (!sel) return;
+    sel.innerHTML = PRODUCTS.map(p => `<option value="${p.id}">${productName(p.id)}</option>`).join('');
+    sel.value = settings.product || PRODUCTS[0].id;
+    sel.onchange = () => {
+      settings.product = sel.value;
+      settings.die = 'auto';            // รีเซ็ตเป็นอัตโนมัติเมื่อเปลี่ยนชนิดอาหาร
+      saveSettings();
+      populateDieSelect();
+    };
+  }
+  function populateShiftSelect() {
+    const sel = $('shift-select');
+    if (!sel) return;
+    sel.innerHTML = SHIFTS.map(s => `<option value="${s.id}">${shiftName(s.id)}</option>`).join('');
+    sel.value = settings.shift || '';
+    sel.onchange = () => { settings.shift = sel.value; saveSettings(); };
+  }
+  function populateRefSelect() {
+    const sel = $('ref-select');
+    if (!sel) return;
+    sel.innerHTML = REF_OBJECTS.map(r => `<option value="${r.id}">${refName(r.id)}</option>`).join('');
+    sel.value = settings.refObject || REF_OBJECTS[0].id;
+    sel.onchange = () => { settings.refObject = sel.value; saveSettings(); };
+  }
+
+  /* ---------------- คาลิเบรตอัตโนมัติ (ข้อ 1) ---------------- */
+  function initAutoCal() {
+    $('btn-autocal').addEventListener('click', () => {
+      if (!state.img) { alert(t('cal_alert')); return; }
+      const ref = REF_OBJECTS.find(r => r.id === settings.refObject) || REF_OBJECTS[0];
+      $('loading-text').textContent = t('cal_auto_run');
+      $('loading').hidden = false;
+      setTimeout(() => {
+        try {
+          const r = Analyzer.detectReference(state.img, ref.mm, { polarity: settings.polarity });
+          if (!r.found) { toast(t('cal_auto_fail')); return; }
+          settings.mmpp = r.mmpp;
+          saveSettings();
+          syncSettingsForm();
+          updateCalibStatus();
+          // แสดงภาพที่ตรวจพบวัตถุอ้างอิง
+          const c = $('canvas-main');
+          c.width = r.annotated.width; c.height = r.annotated.height;
+          c.getContext('2d').drawImage(r.annotated, 0, 0);
+          state.procScale = state.img.naturalWidth / c.width;
+          toast(t('cal_auto_ok', { mm: ref.mm, px: r.diaPx }));
+        } catch (e) { toast(t('cal_auto_fail')); console.error(e); }
+        finally { $('loading').hidden = true; }
+      }, 60);
+    });
   }
 
   /* ---------------- tabs ---------------- */
@@ -430,7 +556,7 @@
     const sel = $('die-select');
     sel.innerHTML = `<option value="auto">${t('die_auto')}</option>` +
       `<option value="">${t('die_none')}</option>` +
-      settings.specs.map(s =>
+      specsForProduct().map(s =>
         `<option value="${s.die}">Die ${s.die} — ${s.min_mm}-${s.max_mm} mm (≥${s.target_pct}%)</option>`).join('');
     sel.value = settings.die ?? 'auto';
     if (sel.selectedIndex < 0) sel.value = 'auto';
@@ -516,6 +642,10 @@
     set('st-max', stats.max_length_mm, 1);
     set('st-area', stats.avg_area_mm2 || 0, 2);
     set('st-cv', stats.cv_pct || 0, 1);
+    // ข้อ 3: % ฝุ่น (undersize จากการร่อน) — แสดงเมื่อมี yield
+    const finesBox = $('st-fines-box'), y0 = state.results.yield;
+    if (y0) { finesBox.hidden = false; set('st-fines', y0.under_vol || 0, 1); }
+    else finesBox.hidden = true;
 
     const sp = $('split-note');
     sp.hidden = false;
@@ -533,7 +663,14 @@
     renderTexture(stats);
     renderPelletTable(pellets);
 
-    if (settings.operator && !$('f-operator').value) $('f-operator').value = settings.operator;
+    // เติมชื่อผู้ตรวจอัตโนมัติจากผู้ใช้ที่ล็อกอิน
+    const defOp = (state.currentUser && state.currentUser.name) || settings.operator;
+    if (defOp && !$('f-operator').value) $('f-operator').value = defOp;
+    // ข้อ 2: คำแนะนำ PDI จากคะแนนเนื้อสัมผัส (ประมาณ)
+    if (stats.texture) {
+      const est = Math.round(88 + (stats.texture.score - 70) * 0.12);
+      $('pdi-hint').textContent = '💡 ' + t('pdi_est', { v: Math.max(80, Math.min(99, est)) });
+    } else $('pdi-hint').textContent = '';
     $('card-results').hidden = false;
     if (animate) $('card-results').scrollIntoView({ behavior: 'smooth' });
   }
@@ -886,8 +1023,12 @@
         const sr = state.results.specResult;
         const spec = state.results.spec;
         if ($('f-operator').value) { settings.operator = $('f-operator').value; saveSettings(); }
-        const saved = await DB.saveSession({
+        const record = {
           factory: settings.factory || null,
+          product: settings.product || null,
+          shift: settings.shift || null,
+          fines_pct: state.results.yield ? state.results.yield.under_vol : null,
+          pdi: parseFloat($('f-pdi').value) || null,
           sample_name: $('f-sample').value || null,
           operator: $('f-operator').value || null,
           notes: $('f-notes').value || null,
@@ -910,10 +1051,20 @@
           over_pct: sr ? sr.over_pct : null,
           spec_pass: sr ? sr.pass : null,
           yield: state.results.yield || null,
-        }, blob);
-        state.lastSavedId = saved.id;
-        st.className = 'save-status ok';
-        st.textContent = t('save_ok');
+        };
+        try {
+          const saved = await DB.saveSession(record, blob);
+          state.lastSavedId = saved.id;
+          st.className = 'save-status ok';
+          st.textContent = t('save_ok');
+        } catch (netErr) {
+          // ออฟไลน์/บันทึกไม่ได้ → เก็บคิวไว้ซิงค์ภายหลัง (ข้อ 8)
+          const img = blob ? await new Promise(rs => { const fr = new FileReader(); fr.onload = () => rs(fr.result); fr.readAsDataURL(blob); }) : null;
+          const q = offlineQueue(); q.push({ record, image: img }); setQueue(q);
+          st.className = 'save-status ok';
+          st.textContent = t('save_offline');
+          console.warn('queued offline:', netErr);
+        }
       } catch (err) {
         st.className = 'save-status err';
         st.textContent = t('save_err') + ': ' + (err.message || err);
@@ -944,6 +1095,56 @@
       };
       downloadCsv(`pellet-${Date.now()}.csv`, sessionCsvRows(s, state.results.pellets));
     });
+
+    $('btn-pdf').addEventListener('click', () => { if (state.results) exportPDF(); });
+  }
+
+  /* ---------------- PDF (พิมพ์/บันทึก) ข้อ 4 ---------------- */
+  function exportPDF() {
+    const s = state.results.stats, sr = state.results.specResult, y = state.results.yield, sp = state.results.spec;
+    const ac = s.avg_color;
+    const img = state.results.annotated.toDataURL('image/jpeg', 0.85);
+    const row = (k, v) => `<tr><td>${k}</td><td><b>${v}</b></td></tr>`;
+    const now = new Date().toLocaleString();
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>AICAM Report</title>
+      <style>
+        body{font-family:-apple-system,"Segoe UI",Roboto,"Sarabun",sans-serif;color:#1f2937;margin:24px;}
+        h1{color:#1b6e5a;margin:0 0 2px;font-size:22px;} .sub{color:#6b7280;font-size:13px;margin-bottom:14px;}
+        table{border-collapse:collapse;width:100%;margin:8px 0 16px;font-size:13px;}
+        td{border:1px solid #e5e7eb;padding:6px 10px;} td:first-child{color:#6b7280;width:55%;}
+        .imgs{display:flex;gap:12px;flex-wrap:wrap;} img{max-width:340px;border:1px solid #ddd;border-radius:8px;}
+        .badge{display:inline-block;padding:3px 10px;border-radius:99px;font-weight:700;font-size:12px;}
+        .pass{background:#dcfce7;color:#16a34a;} .fail{background:#fee2e2;color:#dc2626;}
+        .grid{display:flex;gap:18px;flex-wrap:wrap;}
+        @media print{ button{display:none;} }
+      </style></head><body>
+      <h1>🌾 AICAM Pellet Analyzer — รายงานคุณภาพอาหารเม็ด</h1>
+      <div class="sub">${now} · ${factoryName(settings.factory)} · ${productName(settings.product)}${settings.shift ? ' · ' + shiftName(settings.shift) : ''} · ${t('rep_inspector')}: ${$('f-operator').value || '-'}${$('f-sample').value ? ' · ' + $('f-sample').value : ''}</div>
+      <div class="grid"><div style="flex:1;min-width:260px">
+        <table>
+          ${row(t('st_count'), s.count)}
+          ${row(t('st_avg_len') + ' มม.', s.avg_length_mm.toFixed(2))}
+          ${row(t('st_avg_dia') + ' มม.', s.avg_diameter_mm.toFixed(2))}
+          ${row(t('st_sd'), s.sd_length_mm.toFixed(2))}
+          ${row(t('st_min') + '/' + t('st_max'), s.min_length_mm.toFixed(1) + ' / ' + s.max_length_mm.toFixed(1))}
+          ${row(t('st_area'), (s.avg_area_mm2 || 0).toFixed(2))}
+          ${row(t('st_cv'), (s.cv_pct || 0).toFixed(1) + '%')}
+          ${sp && sr ? row('Die ' + sp.die + ' · Insize', sr.insize_pct + '% <span class="badge ' + (sr.pass ? 'pass' : 'fail') + '">' + (sr.pass ? t('csv_pass') : t('csv_fail')) + '</span>') : ''}
+          ${y ? row('%Yield (' + yieldMeshLabel(y) + ')', y.yield + '% <span class="badge ' + (y.pass ? 'pass' : 'fail') + '">' + (y.pass ? t('csv_pass') : t('csv_fail')) + '</span>') : ''}
+          ${y ? row(t('st_fines'), y.under_vol + '%') : ''}
+          ${$('f-pdi').value ? row('PDI', $('f-pdi').value) : ''}
+          ${ac && ac.lab ? row('CIELAB', 'L*' + (+ac.lab.l).toFixed(1) + ' a*' + (+ac.lab.a).toFixed(1) + ' b*' + (+ac.lab.b).toFixed(1) + (ac.delta_e00 != null ? ' · ΔE00 ' + ac.delta_e00 : '')) : ''}
+          ${s.texture ? row(t('tex_title'), s.texture.score + '/100 (' + s.texture.grade + ')') : ''}
+        </table>
+      </div>
+      <div class="imgs"><img src="${img}"></div></div>
+      <p class="sub">วัดด้วย Max/Min Feret diameter (ISO 13322/9276) · คัดเม็ดติดกัน/สิ่งแปลกปลอม · %Yield จากตะแกรงร่อน mesh</p>
+      <button onclick="window.print()" style="padding:10px 18px;font-size:15px;border:none;border-radius:8px;background:#1b6e5a;color:#fff;cursor:pointer">🖨 พิมพ์ / บันทึก PDF</button>
+      <script>window.onload=()=>setTimeout(()=>window.print(),400)<\/script>
+      </body></html>`;
+    const w = window.open('', '_blank');
+    if (!w) { toast(t('pdf_popup')); return; }
+    w.document.write(html); w.document.close();
   }
 
   /* ---------------- CSV ---------------- */
@@ -1043,6 +1244,71 @@
         },
       },
     });
+    // ---- SPC: เส้นควบคุม (ข้อ 5) บนแกน insize ----
+    const ins = data.map(r => r.insize_pct).filter(v => v != null).map(Number);
+    if (ins.length >= 3) {
+      const mean = ins.reduce((a, b) => a + b, 0) / ins.length;
+      const sd = Math.sqrt(ins.reduce((a, b) => a + (b - mean) ** 2, 0) / ins.length);
+      const ucl = Math.min(100, mean + 3 * sd), lcl = Math.max(0, mean - 3 * sd);
+      const ch = state.charts['chart-trend'];
+      ch.data.datasets.push(
+        { label: 'CL', data: labels.map(() => +mean.toFixed(1)), borderColor: '#16a34a', borderWidth: 1, borderDash: [2, 3], pointRadius: 0, yAxisID: 'y2' },
+        { label: 'UCL', data: labels.map(() => +ucl.toFixed(1)), borderColor: '#dc2626', borderWidth: 1, borderDash: [4, 4], pointRadius: 0, yAxisID: 'y2' },
+        { label: 'LCL', data: labels.map(() => +lcl.toFixed(1)), borderColor: '#dc2626', borderWidth: 1, borderDash: [4, 4], pointRadius: 0, yAxisID: 'y2' },
+      );
+      ch.update();
+    }
+    // ---- แจ้งเตือนเมื่อหลุดสเปกติดกัน ----
+    const recent = data.slice(-3).filter(r => r.spec_pass != null);
+    const fails = recent.filter(r => !r.spec_pass).length;
+    const alertEl = $('spc-alert');
+    if (recent.length >= 2 && fails >= 2) {
+      alertEl.hidden = false;
+      alertEl.textContent = t('spc_warn', { n: fails });
+    } else alertEl.hidden = true;
+  }
+
+  /* เปรียบเทียบ (ข้อ 6) — Yield/Insize เฉลี่ย ตามโรงงาน/ผู้ตรวจ/กะ */
+  let cmpMode = 'factory';
+  function renderCompare(rows) {
+    const box = $('compare-box');
+    if (rows.length < 2) { box.hidden = true; return; }
+    box.hidden = false;
+    const keyFn = {
+      factory: r => factoryName(r.factory) || '—',
+      operator: r => r.operator || '—',
+      shift: r => shiftName(r.shift) || '—',
+    }[cmpMode];
+    const groups = {};
+    for (const r of rows) {
+      const k = keyFn(r);
+      (groups[k] = groups[k] || []).push(r);
+    }
+    const labels = Object.keys(groups);
+    const avgIns = labels.map(k => {
+      const v = groups[k].map(r => r.insize_pct).filter(x => x != null).map(Number);
+      return v.length ? +(v.reduce((a, b) => a + b, 0) / v.length).toFixed(1) : 0;
+    });
+    const passRate = labels.map(k => {
+      const v = groups[k].filter(r => r.spec_pass != null);
+      return v.length ? Math.round(v.filter(r => r.spec_pass).length * 100 / v.length) : 0;
+    });
+    if (state.charts['chart-compare']) state.charts['chart-compare'].destroy();
+    state.charts['chart-compare'] = new Chart($('chart-compare'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: t('trend_insize'), data: avgIns, backgroundColor: settings.theme || '#1b6e5a', borderRadius: 4 },
+          { label: t('daily_pass') + ' %', data: passRate, backgroundColor: '#3b82f6', borderRadius: 4 },
+        ],
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: 'bottom', labels: { boxWidth: 14, font: { size: 11 } } } },
+        scales: { y: { beginAtZero: true, max: 100 } },
+      },
+    });
   }
 
   /* แถบกรองโรงงาน */
@@ -1107,11 +1373,15 @@
       if (!rows.length) {
         $('trend-box').hidden = true;
         $('daily-box').hidden = true;
+        $('compare-box').hidden = true;
+        $('spc-alert').hidden = true;
         list.innerHTML = `<div class="empty">🦐<br>${t('rep_empty')}</div>`;
         return;
       }
+      state.reportRows = rows;
       renderDaily(rows);
       renderTrend(rows.slice(0, 30));
+      renderCompare(rows);
       list.innerHTML = '';
       rows.forEach((r, idx) => {
         const div = document.createElement('div');
@@ -1159,6 +1429,12 @@
     };
     $('modal-close').addEventListener('click', closeModal);
     $('modal').addEventListener('click', e => { if (e.target === $('modal')) closeModal(); });
+    // แท็บเปรียบเทียบ (ข้อ 6)
+    document.querySelectorAll('.cmp-tab').forEach(b => b.addEventListener('click', () => {
+      cmpMode = b.dataset.cmp;
+      document.querySelectorAll('.cmp-tab').forEach(x => x.classList.toggle('active', x === b));
+      if (state.reportRows) renderCompare(state.reportRows);
+    }));
   }
 
   async function openReport(id) {
@@ -1274,6 +1550,7 @@
         shareReport(id, s.sample_name, s.pellet_count, (+s.avg_length_mm).toFixed(1)));
       $('m-csv').addEventListener('click', () => downloadCsv(`pellet-${id.slice(0, 8)}.csv`, sessionCsvRows(s, s.pellets)));
       $('m-del').addEventListener('click', async () => {
+        if (!isAdmin()) { toast(t('admin_only')); return; }
         if (!confirm(t('rep_delete_confirm'))) return;
         await DB.deleteSession(id, s.image_url);
         modal.hidden = true;
@@ -1293,8 +1570,10 @@
     // หัวคอลัมน์ตะแกรงเปลี่ยนตามหน่วย
     $('th-sieve-u').textContent = mesh ? t('th_sieve_u_mesh') : t('th_sieve_u');
     $('th-sieve-o').textContent = mesh ? t('th_sieve_o_mesh') : t('th_sieve_o');
+    const prodOpts = i => PRODUCTS.map(p => `<option value="${p.id}"${(settings.specs[i].product || 'shrimp') === p.id ? ' selected' : ''}>${productName(p.id)}</option>`).join('');
     tbody.innerHTML = settings.specs.map((s, i) => `
       <tr>
+        <td><select data-spec="${i}" data-f="product">${prodOpts(i)}</select></td>
         <td><input data-spec="${i}" data-f="die" value="${s.die}"></td>
         <td><input data-spec="${i}" data-f="min_mm" type="number" step="0.1" value="${s.min_mm}"></td>
         <td><input data-spec="${i}" data-f="max_mm" type="number" step="0.1" value="${s.max_mm}"></td>
@@ -1304,10 +1583,10 @@
         <td><input data-spec="${i}" data-f="yield_target" type="number" step="5" value="${s.yield_target}"></td>
         <td><button class="spec-del" data-del="${i}">🗑</button></td>
       </tr>`).join('');
-    tbody.querySelectorAll('input').forEach(inp => {
+    tbody.querySelectorAll('input,select').forEach(inp => {
       inp.addEventListener('change', () => {
         const i = +inp.dataset.spec, f = inp.dataset.f;
-        if (f === 'die') { settings.specs[i][f] = inp.value; return; }
+        if (f === 'die' || f === 'product') { settings.specs[i][f] = inp.value; return; }
         let val = parseFloat(inp.value) || 0;
         if (inp.dataset.sieve && mesh) val = meshToMm(val); // แปลง mesh → มม. ก่อนเก็บ
         settings.specs[i][f] = val;
@@ -1319,6 +1598,28 @@
         renderSpecEditor();
       });
     });
+  }
+
+  /* ---------------- ผู้ใช้และสิทธิ์ (ข้อ 7) ---------------- */
+  function renderUsersEditor() {
+    const tbody = $('tbl-users').querySelector('tbody');
+    if (!tbody) return;
+    const roleOpts = r => ['admin', 'inspector'].map(x => `<option value="${x}"${r === x ? ' selected' : ''}>${t('role_' + x)}</option>`).join('');
+    tbody.innerHTML = settings.users.map((u, i) => `
+      <tr>
+        <td><input data-u="${i}" data-f="name" value="${u.name || ''}"></td>
+        <td><input data-u="${i}" data-f="pin" inputmode="numeric" value="${u.pin || ''}"></td>
+        <td><select data-u="${i}" data-f="role">${roleOpts(u.role || 'inspector')}</select></td>
+        <td><button class="spec-del" data-deluser="${i}">🗑</button></td>
+      </tr>`).join('');
+    tbody.querySelectorAll('input,select').forEach(inp => {
+      inp.addEventListener('change', () => { settings.users[+inp.dataset.u][inp.dataset.f] = inp.value; });
+    });
+    tbody.querySelectorAll('.spec-del').forEach(btn => btn.addEventListener('click', () => {
+      if (settings.users.length <= 1) return;   // ต้องมีอย่างน้อย 1
+      settings.users.splice(+btn.dataset.deluser, 1);
+      renderUsersEditor();
+    }));
   }
 
   function syncSettingsForm() {
@@ -1333,11 +1634,11 @@
     $('s-refcolor').value = settings.refcolor;
     $('s-userefcolor').checked = settings.userefcolor;
     $('s-demax').value = settings.demax;
-    $('s-pin').value = settings.pin;
     $('s-theme').value = settings.theme;
     $('s-sieveunit').value = settings.sieveUnit || 'mm';
     renderThemeSwatches();
     renderSpecEditor();
+    renderUsersEditor();
   }
 
   function renderThemeSwatches() {
@@ -1357,8 +1658,12 @@
 
   function initSettings() {
     $('btn-add-spec').addEventListener('click', () => {
-      settings.specs.push({ die: '', min_mm: 0, max_mm: 0, target_pct: 60, sieve_under: 0, sieve_over: 0, yield_target: 90 });
+      settings.specs.push({ product: settings.product || 'shrimp', die: '', min_mm: 0, max_mm: 0, target_pct: 60, sieve_under: 0, sieve_over: 0, yield_target: 95 });
       renderSpecEditor();
+    });
+    $('btn-add-user').addEventListener('click', () => {
+      settings.users.push({ name: '', pin: '', role: 'inspector' });
+      renderUsersEditor();
     });
     $('s-theme').addEventListener('input', e => {
       settings.theme = e.target.value;
@@ -1371,6 +1676,7 @@
       renderSpecEditor();
     });
     $('btn-save-settings').addEventListener('click', () => {
+      if (!isAdmin()) { toast(t('admin_only')); return; }
       settings.mmpp = parseFloat($('s-mmpp').value) || 0;
       settings.operator = $('s-operator').value;
       settings.bins = $('s-bins').value || DEFAULTS.bins;
@@ -1383,13 +1689,15 @@
       settings.userefcolor = $('s-userefcolor').checked;
       settings.demax = parseFloat($('s-demax').value) || DEFAULTS.demax;
       settings.theme = $('s-theme').value || DEFAULTS.theme;
-      const pin = $('s-pin').value.trim();
-      if (/^\d{4,8}$/.test(pin)) settings.pin = pin;
+      settings.users = settings.users.filter(u => u.name && /^\d{4,8}$/.test(String(u.pin)));
+      if (!settings.users.length) settings.users = [{ name: 'Admin', pin: '1234', role: 'admin' }];
+      if (!settings.users.some(u => u.role === 'admin')) settings.users[0].role = 'admin';
       settings.specs = settings.specs.filter(s => s.die !== '' && s.max_mm > 0).map(fillSieveDefaults);
       saveSettings();
       updateCalibStatus();
       populateDieSelect();
       renderSpecEditor();
+      renderUsersEditor();
       // คำนวณ yield ใหม่ถ้ามีผลค้างอยู่
       if (state.results && state.results.spec) {
         state.results.yield = computeYield(state.results.pellets, currentSpec() || state.results.spec);
@@ -1406,9 +1714,66 @@
       const ok = await DB.ping();
       el.className = 'net-status ' + (ok ? 'online' : 'offline');
       el.title = ok ? t('net_on') : t('net_off');
+      if (ok) flushOfflineQueue();
     } catch {
       el.className = 'net-status offline';
     }
+  }
+
+  /* ---------------- ผู้ใช้ / สิทธิ์ (ข้อ 7) ---------------- */
+  function updateUserBadge() {
+    const b = $('user-badge');
+    if (!b) return;
+    if (state.currentUser) {
+      b.hidden = false;
+      b.textContent = (state.currentUser.role === 'admin' ? '👑 ' : '👤 ') + state.currentUser.name;
+    } else b.hidden = true;
+    b.onclick = () => {
+      if (!confirm(t('logout_confirm'))) return;
+      sessionStorage.removeItem('aicam-unlocked');
+      sessionStorage.removeItem('aicam-user');
+      localStorage.removeItem('aicam-unlock-until');
+      localStorage.removeItem('aicam-user-remember');
+      location.reload();
+    };
+  }
+  function applyRole() {
+    // ผู้ที่ไม่ใช่ admin: ซ่อนปุ่มบันทึกตั้งค่า + ปุ่มเพิ่ม/แก้สเปก-ผู้ใช้
+    const admin = isAdmin();
+    ['btn-save-settings', 'btn-add-spec', 'btn-add-user'].forEach(id => {
+      const el = $(id); if (el) el.style.display = admin ? '' : 'none';
+    });
+    const note = $('role-note');
+    if (note) note.hidden = admin;
+  }
+
+  /* ---------------- คิวออฟไลน์ (ข้อ 8) ---------------- */
+  function offlineQueue() { try { return JSON.parse(localStorage.getItem('aicam-queue') || '[]'); } catch { return []; } }
+  function setQueue(q) { localStorage.setItem('aicam-queue', JSON.stringify(q)); syncOfflineBadge(); }
+  function syncOfflineBadge() {
+    const n = offlineQueue().length;
+    const el = $('offline-badge');
+    if (!el) return;
+    el.hidden = n === 0;
+    $('offline-count').textContent = n;
+  }
+  let flushing = false;
+  async function flushOfflineQueue() {
+    if (flushing) return;
+    const q = offlineQueue();
+    if (!q.length) return;
+    flushing = true;
+    const remain = [];
+    for (const item of q) {
+      try {
+        const blob = item.image ? await (await fetch(item.image)).blob() : null;
+        await DB.saveSession(item.record, blob);
+      } catch (e) { remain.push(item); }
+    }
+    setQueue(remain);
+    flushing = false;
+    if (q.length && !remain.length) toast(t('offline_synced', { n: q.length }));
+    if (state.appStarted && document.getElementById('tab-reports').classList.contains('active')) loadReports();
   }
 
   /* ---------------- init ---------------- */
@@ -1417,4 +1782,9 @@
   initLock();
   if (isUnlocked()) showApp();
   else $('lock-input').focus();
+  window.addEventListener('online', () => { checkNet(); });
+  // ลงทะเบียน service worker (PWA — ข้อ 8)
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
 })();

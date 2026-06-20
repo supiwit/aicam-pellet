@@ -1,0 +1,14 @@
+{
+  "name": "AICAM Pellet Analyzer",
+  "short_name": "AICAM",
+  "description": "วัดขนาดเม็ดอาหารสัตว์ด้วยกล้องมือถือ — ความยาว/Ø, %Yield, สี CIELAB",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b3d31",
+  "theme_color": "#1b6e5a",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

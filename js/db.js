@@ -32,7 +32,7 @@ const DB = (() => {
   async function listSessions(limit = 200, factory = null) {
     let q = client
       .from('measurement_sessions')
-      .select('id, created_at, sample_name, operator, pellet_count, avg_length_mm, avg_diameter_mm, image_url, die_size, insize_pct, spec_pass, factory')
+      .select('id, created_at, sample_name, operator, pellet_count, avg_length_mm, avg_diameter_mm, image_url, die_size, insize_pct, spec_pass, factory, product, shift, fines_pct, pdi')
       .order('created_at', { ascending: false })
       .limit(limit);
     if (factory) q = q.eq('factory', factory);

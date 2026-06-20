@@ -524,6 +524,78 @@ const Analyzer = (() => {
     };
   }
 
+  /**
+   * คาลิเบรตอัตโนมัติ: หาวัตถุอ้างอิงทรงกลม (เหรียญ/วงกลม) ที่ใหญ่และกลมที่สุดในภาพ
+   * คืน mm ต่อพิกเซล(ต้นฉบับ) จากเส้นผ่านศูนย์กลางจริง knownMm
+   * @returns {found, mmpp, diaPx, annotated} หรือ {found:false}
+   */
+  function detectReference(img, knownMm, opts = {}) {
+    const { canvas, scale } = toProcCanvas(img);
+    const w = canvas.width, h = canvas.height;
+    const ctx = canvas.getContext('2d');
+    const data = ctx.getImageData(0, 0, w, h).data;
+    let gray = new Uint8Array(w * h);
+    for (let i = 0, p = 0; i < gray.length; i++, p += 4) {
+      gray[i] = (data[p] * 0.299 + data[p + 1] * 0.587 + data[p + 2] * 0.114) | 0;
+    }
+    gray = flattenIllumination(gray, w, h);
+    const hist = new Uint32Array(256);
+    for (let i = 0; i < gray.length; i++) hist[gray[i]]++;
+    const thr = otsu(hist, w * h);
+    let bright = 0;
+    for (let t = thr + 1; t < 256; t++) bright += hist[t];
+    let fgBright;
+    if (opts.polarity === 'dark') fgBright = true;
+    else if (opts.polarity === 'light') fgBright = false;
+    else fgBright = bright < (w * h - bright);
+    let mask = new Uint8Array(w * h);
+    for (let i = 0; i < mask.length; i++) mask[i] = (gray[i] > thr) === fgBright ? 1 : 0;
+    mask = erodeDilate(erodeDilate(mask, w, h, 'erode'), w, h, 'dilate');
+    mask = fillHoles(mask, w, h);
+
+    const labels = new Int32Array(w * h);
+    const stack = new Int32Array(w * h);
+    let best = null;
+    for (let start = 0; start < mask.length; start++) {
+      if (!mask[start] || labels[start]) continue;
+      let sp = 0; stack[sp++] = start; labels[start] = 1;
+      const px = []; let touch = false;
+      while (sp > 0) {
+        const i = stack[--sp]; px.push(i);
+        const x = i % w, y = (i / w) | 0;
+        if (x === 0 || y === 0 || x === w - 1 || y === h - 1) touch = true;
+        if (x > 0 && mask[i - 1] && !labels[i - 1]) { labels[i - 1] = 1; stack[sp++] = i - 1; }
+        if (x < w - 1 && mask[i + 1] && !labels[i + 1]) { labels[i + 1] = 1; stack[sp++] = i + 1; }
+        if (y > 0 && mask[i - w] && !labels[i - w]) { labels[i - w] = 1; stack[sp++] = i - w; }
+        if (y < h - 1 && mask[i + w] && !labels[i + w]) { labels[i + w] = 1; stack[sp++] = i + w; }
+      }
+      if (touch || px.length < 400) continue;          // ใหญ่พอและไม่ชนขอบ
+      const m = measureComponent(px, w, data);
+      const aspect = m.lengthPx / Math.max(1, m.diaPx);
+      const circleArea = Math.PI * (m.lengthPx / 2) ** 2;
+      const fill = px.length / circleArea;             // ใกล้ 1 = วงกลมเต็ม
+      if (aspect < 1.25 && m.solidity > 0.88 && fill > 0.80) {
+        if (!best || px.length > best.area) {
+          best = { area: px.length, diaEqProc: 2 * Math.sqrt(px.length / Math.PI), m };
+        }
+      }
+    }
+    if (!best) return { found: false };
+    const diaPxOrig = best.diaEqProc * scale;
+    const mmpp = +(knownMm / diaPxOrig).toFixed(5);
+
+    // วาดวงกลมรอบวัตถุอ้างอิง
+    const out = document.createElement('canvas');
+    out.width = w; out.height = h;
+    const octx = out.getContext('2d');
+    octx.drawImage(canvas, 0, 0);
+    octx.strokeStyle = '#3b82f6'; octx.lineWidth = Math.max(2, w / 400);
+    octx.beginPath();
+    octx.arc(best.m.mx, best.m.my, best.diaEqProc / 2, 0, Math.PI * 2);
+    octx.stroke();
+    return { found: true, mmpp, diaPx: +diaPxOrig.toFixed(1), annotated: out };
+  }
+
 
   /** สถิติ + การกระจายตามช่วง (binsMm หน่วย มม.) */
   function computeStats(pellets, binsMm) {
@@ -646,5 +718,5 @@ const Analyzer = (() => {
     };
   }
 
-  return { analyze, computeStats, checkSpec, rgb2lab, deltaE, deltaE2000 };
+  return { analyze, detectReference, computeStats, checkSpec, rgb2lab, deltaE, deltaE2000 };
 })();
