@@ -22,19 +22,43 @@
   /* ---------------- settings ---------------- */
   // sieve_under / sieve_over = ช่องตะแกรง mesh (มม.) สำหรับร่อน undersize/oversize · yield_target = % เป้าหมาย
   const DEFAULT_SPECS = [
-    { die: '1.0', min_mm: 1.0, max_mm: 2.0, target_pct: 60, sieve_under: 0.71, sieve_over: 1.40, yield_target: 90 },
-    { die: '1.2', min_mm: 1.5, max_mm: 2.5, target_pct: 60, sieve_under: 0.85, sieve_over: 1.70, yield_target: 90 },
-    { die: '1.4', min_mm: 2.0, max_mm: 3.0, target_pct: 60, sieve_under: 1.00, sieve_over: 2.00, yield_target: 90 },
-    { die: '1.8', min_mm: 2.0, max_mm: 3.0, target_pct: 60, sieve_under: 1.40, sieve_over: 2.50, yield_target: 90 },
-    { die: '2.0', min_mm: 3.0, max_mm: 4.0, target_pct: 60, sieve_under: 1.60, sieve_over: 2.80, yield_target: 90 },
+    { die: '1.0', min_mm: 1.0, max_mm: 2.0, target_pct: 60, sieve_under: 0.71, sieve_over: 1.40, yield_target: 95 },
+    { die: '1.2', min_mm: 1.5, max_mm: 2.5, target_pct: 60, sieve_under: 0.85, sieve_over: 1.70, yield_target: 95 },
+    { die: '1.4', min_mm: 2.0, max_mm: 3.0, target_pct: 60, sieve_under: 1.00, sieve_over: 2.00, yield_target: 95 },
+    { die: '1.8', min_mm: 2.0, max_mm: 3.0, target_pct: 60, sieve_under: 1.40, sieve_over: 2.50, yield_target: 95 },
+    { die: '2.0', min_mm: 3.0, max_mm: 4.0, target_pct: 60, sieve_under: 1.60, sieve_over: 2.80, yield_target: 95 },
   ];
   // เติมค่าตะแกรง mesh เริ่มต้นให้สเปกเก่าที่ยังไม่มี (อิงเส้นผ่านศูนย์กลาง die)
   function fillSieveDefaults(s) {
     const d = parseFloat(s.die) || 1;
     if (!(s.sieve_under > 0)) s.sieve_under = +(d * 0.72).toFixed(2);
     if (!(s.sieve_over > 0)) s.sieve_over = +(d * 1.4).toFixed(2);
-    if (!(s.yield_target > 0)) s.yield_target = 90;
+    if (!(s.yield_target > 0)) s.yield_target = 95;
     return s;
+  }
+
+  /* ---------------- ตะแกรง mesh มาตรฐาน (ASTM E11 / US sieve) ----------------
+   * แปลงระหว่างเบอร์ mesh กับขนาดช่อง (มม.) — ผู้ใช้เลือกหน่วยได้ในตั้งค่า
+   */
+  const MESH_TABLE = [
+    [3.5, 5.60], [4, 4.75], [5, 4.00], [6, 3.35], [7, 2.80], [8, 2.36], [10, 2.00],
+    [12, 1.70], [14, 1.40], [16, 1.18], [18, 1.00], [20, 0.85], [25, 0.71], [30, 0.60],
+    [35, 0.50], [40, 0.425], [45, 0.355], [50, 0.30], [60, 0.25], [70, 0.212], [80, 0.18],
+    [100, 0.15], [120, 0.125], [140, 0.106], [170, 0.090], [200, 0.075],
+  ];
+  function meshToMm(mesh) {
+    const m = +mesh;
+    if (!(m > 0)) return 0;
+    let best = MESH_TABLE[0], bd = Infinity;
+    for (const [mn, mm] of MESH_TABLE) { const d = Math.abs(mn - m); if (d < bd) { bd = d; best = [mn, mm]; } }
+    return best[1];
+  }
+  function mmToMesh(mm) {
+    const v = +mm;
+    if (!(v > 0)) return 0;
+    let best = MESH_TABLE[0], bd = Infinity;
+    for (const row of MESH_TABLE) { const d = Math.abs(row[1] - v); if (d < bd) { bd = d; best = row; } }
+    return best[0];
   }
   // โรงงานอาหารกุ้ง 3 แห่ง (เวียดนาม) — เก็บข้อมูลแยกกัน
   const FACTORIES = [
@@ -67,12 +91,15 @@
     factory: 'ben-tre',
     theme: '#1b6e5a',
     reportFactory: '',
+    sieveUnit: 'mm',   // 'mm' หรือ 'mesh'
     specs: DEFAULT_SPECS,
   };
   const stored = JSON.parse(localStorage.getItem('aicam-settings') || '{}');
   const settings = { ...DEFAULTS, ...stored };
   if (!Array.isArray(settings.specs) || !settings.specs.length) settings.specs = DEFAULT_SPECS;
   settings.specs.forEach(fillSieveDefaults); // เติมค่าตะแกรง mesh ให้สเปกเก่า
+  // ปรับค่าเริ่มต้น Yield 90 → 95 (ครั้งเดียว)
+  if (!settings.yieldV95) { settings.specs.forEach(s => { if (s.yield_target === 90) s.yield_target = 95; }); settings.yieldV95 = true; }
   // ย้ายหน่วยช่วงความยาวจาก ซม. เป็น มม. (ครั้งเดียว เฉพาะค่าเก่าที่บันทึกไว้เป็น ซม.)
   if (stored.bins && stored.binsUnit !== 'mm') {
     settings.bins = stored.bins.split(',')
@@ -246,6 +273,14 @@
       getContext: () => state.results
         ? { stats: state.results.stats, specResult: state.results.specResult, spec: state.results.spec }
         : null,
+    });
+
+    // กราฟในส่วนยุบ — ปรับขนาดเมื่อกางออก (canvas ใน details ที่ปิดมีขนาด 0)
+    const md = $('more-details');
+    if (md) md.addEventListener('toggle', () => {
+      if (md.open) ['chart-donut', 'chart-dia', 'chart-radar'].forEach(id => {
+        try { state.charts[id] && state.charts[id].resize(); } catch (e) {}
+      });
     });
 
     // deep link: ?report=<id>
@@ -550,6 +585,13 @@
   }
 
   /* ---------------- yield panel (ตะแกรงร่อน) ---------------- */
+  function yieldMeshLabel(y) {
+    const mesh = settings.sieveUnit === 'mesh';
+    const u = mesh ? mmToMesh(y.sieve_under) : y.sieve_under;
+    const o = mesh ? mmToMesh(y.sieve_over) : y.sieve_over;
+    return t('yield_mesh', { u, o, unit: mesh ? t('unit_mesh') : t('unit_mm') });
+  }
+
   function renderYieldPanel(animate) {
     const panel = $('yield-panel');
     const y = state.results ? state.results.yield : null;
@@ -565,8 +607,7 @@
     badge.className = 'spec-badge ' + (y.pass ? 'pass' : 'fail');
     badge.textContent = y.pass ? t('spec_pass') : t('spec_fail');
 
-    $('yield-meta').textContent =
-      `${t('yield_mesh', { u: y.sieve_under, o: y.sieve_over })} · 🎯 ${t('yield_target', { t: y.target })}`;
+    $('yield-meta').textContent = yieldMeshLabel(y) + ' · 🎯 ' + t('yield_target', { t: y.target });
 
     const segs = [
       ['yseg-under', 'ylg-under', y.under_vol],
@@ -657,6 +698,48 @@
     return { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255 };
   }
 
+  /* CIELAB → RGB (D65) สำหรับสร้างแถบสเกล ΔE00 */
+  function lab2rgb(L, a, b) {
+    let y = (L + 16) / 116, x = a / 500 + y, z = y - b / 200;
+    const f = t => (t ** 3 > 0.008856 ? t ** 3 : (t - 16 / 116) / 7.787);
+    x = 0.95047 * f(x); y = 1.0 * f(y); z = 1.08883 * f(z);
+    let r = x * 3.2406 - y * 1.5372 - z * 0.4986;
+    let g = -x * 0.9689 + y * 1.8758 + z * 0.0415;
+    let bl = x * 0.0557 - y * 0.2040 + z * 1.0570;
+    const gm = c => (c > 0.0031308 ? 1.055 * Math.pow(c, 1 / 2.4) - 0.055 : 12.92 * c);
+    const cl = v => Math.max(0, Math.min(255, Math.round(gm(v) * 255)));
+    return [cl(r), cl(g), cl(bl)];
+  }
+
+  /* หาสีที่ห่างจาก baseLab เท่ากับ target (ΔE) โดยเลื่อนใน Lab */
+  function colorAtDeltaE(baseLab, target) {
+    if (target <= 0) return baseLab;
+    let dir = [1, -0.35, -0.6];
+    const nrm = Math.hypot(...dir); dir = dir.map(x => x / nrm);
+    let lo = 0, hi = 80;
+    for (let it = 0; it < 28; it++) {
+      const m = (lo + hi) / 2;
+      const cand = { l: baseLab.l + dir[0] * m, a: baseLab.a + dir[1] * m, b: baseLab.b + dir[2] * m };
+      (Analyzer.deltaE(baseLab, cand) < target) ? (lo = m) : (hi = m);
+    }
+    const m = (lo + hi) / 2;
+    return { l: baseLab.l + dir[0] * m, a: baseLab.a + dir[1] * m, b: baseLab.b + dir[2] * m };
+  }
+
+  /* แถบสเกลสี ΔE00 = 0, 10, 20 จากสีตัวอย่าง */
+  function renderColorRange(baseLab) {
+    const box = $('color-range');
+    if (!box || !baseLab) { if (box) box.hidden = true; return; }
+    const targets = [0, 10, 20];
+    box.hidden = false;
+    box.innerHTML = `<div class="cr-title">${t('color_range_title')}</div><div class="cr-swatches">` +
+      targets.map(tg => {
+        const lab = colorAtDeltaE(baseLab, tg);
+        const [r, g, b] = lab2rgb(lab.l, lab.a, lab.b);
+        return `<div class="cr-item"><div class="cr-sw" style="background:rgb(${r},${g},${b})"></div><div class="cr-lab">ΔE00<br><b>${tg}</b></div></div>`;
+      }).join('') + '</div>';
+  }
+
   function renderColor(stats) {
     const ac = stats.avg_color;
     if (!ac) return;
@@ -706,6 +789,7 @@
     }
     $('lab-panel').innerHTML = labHtml;
     $('lab-panel').hidden = false;
+    renderColorRange(lab);
   }
 
   /* ---------------- คุณภาพหน้าตัดเม็ด ---------------- */
@@ -768,7 +852,7 @@
     const url = reportUrl(id);
     // 1) Web Share API (มือถือ) — เฉพาะ secure context
     if (navigator.share && window.isSecureContext) {
-      try { await navigator.share({ title: 'C.P. Vietnam', text, url }); return; }
+      try { await navigator.share({ title: 'AICAM Pellet Analyzer', text, url }); return; }
       catch (e) { if (e && e.name === 'AbortError') return; /* ผู้ใช้ยกเลิก */ }
     }
     // 2) คัดลอกลิงก์ลงคลิปบอร์ด
@@ -1113,7 +1197,7 @@
           <div class="yield-row">
             <div class="yield-ring ${y.pass ? 'pass' : 'fail'}" style="--p:${y.yield}"><div class="yield-value">${y.yield}</div><div class="yield-unit">% Yield</div></div>
             <div class="yield-side">
-              <div class="spec-meta">${t('yield_mesh', { u: y.sieve_under, o: y.sieve_over })} · 🎯 ${t('yield_target', { t: y.target })}</div>
+              <div class="spec-meta">${yieldMeshLabel(y)} · 🎯 ${t('yield_target', { t: y.target })}</div>
               <div class="spec-bar">
                 <div class="spec-seg under" style="width:${y.under_vol}%"><span>${y.under_vol >= 8 ? y.under_vol + '%' : ''}</span></div>
                 <div class="spec-seg insize" style="width:${y.yield}%"><span>${y.yield >= 8 ? y.yield + '%' : ''}</span></div>
@@ -1203,21 +1287,30 @@
   /* ---------------- ตั้งค่า ---------------- */
   function renderSpecEditor() {
     const tbody = $('tbl-specs').querySelector('tbody');
+    const mesh = settings.sieveUnit === 'mesh';
+    const sv = mm => mesh ? mmToMesh(mm) : mm;     // ค่าที่แสดงในช่อง
+    const step = mesh ? '1' : '0.05';
+    // หัวคอลัมน์ตะแกรงเปลี่ยนตามหน่วย
+    $('th-sieve-u').textContent = mesh ? t('th_sieve_u_mesh') : t('th_sieve_u');
+    $('th-sieve-o').textContent = mesh ? t('th_sieve_o_mesh') : t('th_sieve_o');
     tbody.innerHTML = settings.specs.map((s, i) => `
       <tr>
         <td><input data-spec="${i}" data-f="die" value="${s.die}"></td>
         <td><input data-spec="${i}" data-f="min_mm" type="number" step="0.1" value="${s.min_mm}"></td>
         <td><input data-spec="${i}" data-f="max_mm" type="number" step="0.1" value="${s.max_mm}"></td>
         <td><input data-spec="${i}" data-f="target_pct" type="number" step="5" value="${s.target_pct}"></td>
-        <td><input data-spec="${i}" data-f="sieve_under" type="number" step="0.05" value="${s.sieve_under}"></td>
-        <td><input data-spec="${i}" data-f="sieve_over" type="number" step="0.05" value="${s.sieve_over}"></td>
+        <td><input data-spec="${i}" data-f="sieve_under" data-sieve="1" type="number" step="${step}" value="${sv(s.sieve_under)}"></td>
+        <td><input data-spec="${i}" data-f="sieve_over" data-sieve="1" type="number" step="${step}" value="${sv(s.sieve_over)}"></td>
         <td><input data-spec="${i}" data-f="yield_target" type="number" step="5" value="${s.yield_target}"></td>
         <td><button class="spec-del" data-del="${i}">🗑</button></td>
       </tr>`).join('');
     tbody.querySelectorAll('input').forEach(inp => {
       inp.addEventListener('change', () => {
         const i = +inp.dataset.spec, f = inp.dataset.f;
-        settings.specs[i][f] = f === 'die' ? inp.value : parseFloat(inp.value) || 0;
+        if (f === 'die') { settings.specs[i][f] = inp.value; return; }
+        let val = parseFloat(inp.value) || 0;
+        if (inp.dataset.sieve && mesh) val = meshToMm(val); // แปลง mesh → มม. ก่อนเก็บ
+        settings.specs[i][f] = val;
       });
     });
     tbody.querySelectorAll('.spec-del').forEach(btn => {
@@ -1242,6 +1335,7 @@
     $('s-demax').value = settings.demax;
     $('s-pin').value = settings.pin;
     $('s-theme').value = settings.theme;
+    $('s-sieveunit').value = settings.sieveUnit || 'mm';
     renderThemeSwatches();
     renderSpecEditor();
   }
@@ -1270,6 +1364,11 @@
       settings.theme = e.target.value;
       applyTheme(settings.theme);
       renderThemeSwatches();
+    });
+    $('s-sieveunit').addEventListener('change', e => {
+      settings.sieveUnit = e.target.value;
+      saveSettings();
+      renderSpecEditor();
     });
     $('btn-save-settings').addEventListener('click', () => {
       settings.mmpp = parseFloat($('s-mmpp').value) || 0;
