@@ -79,8 +79,11 @@ body {
   padding: 12px 16px;
   display: flex; justify-content: space-between; align-items: center;
 }
-.logo { font-weight: 700; font-size: 18px; }
-.logo span { font-weight: 400; opacity: .85; font-size: 13px; margin-left: 6px; }
+.logo { font-weight: 700; font-size: 18px; display: flex; align-items: center; gap: 9px; }
+.cp-mark-sm { flex-shrink: 0; border-radius: 7px; box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+.logo .brand { display: flex; flex-direction: column; line-height: 1.15; font-size: 15px; }
+.logo .brand span { font-weight: 400; opacity: .85; font-size: 10.5px; margin: 0; }
+.cp-tagline { color: #cfe9df; font-size: 12.5px; margin: -2px 0 14px; letter-spacing: .3px; }
 .topbar-right { display: flex; align-items: center; gap: 12px; }
 .lang-select {
   background: rgba(255,255,255,.15); color: #fff; border: 1px solid rgba(255,255,255,.3);
@@ -302,6 +305,38 @@ body {
 .save-status { margin-top: 8px; font-size: 14px; min-height: 20px; }
 .save-status.ok { color: var(--ok); }
 .save-status.err { color: var(--danger); }
+
+/* ---------- factory filter ---------- */
+.factory-filter { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 4px; }
+.fchip {
+  background: #eef2f1; border: 1px solid #dbe5e1; border-radius: 99px;
+  padding: 7px 14px; font-size: 13px; font-weight: 600; color: var(--green-dark); cursor: pointer;
+}
+.fchip.active { background: var(--green); color: #fff; border-color: var(--green); }
+
+/* ---------- daily summary ---------- */
+.daily-list { display: flex; gap: 10px; overflow-x: auto; padding: 4px 2px 8px; }
+.daily-card {
+  flex: 0 0 auto; min-width: 180px; background: var(--green-light);
+  border-radius: 12px; padding: 11px 13px; animation: fadeUp .35s ease both;
+}
+.daily-date { font-weight: 800; color: var(--green-dark); font-size: 14px; margin-bottom: 6px; }
+.daily-metrics { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: var(--muted); }
+.daily-metrics b { color: var(--text); font-size: 14px; }
+.daily-pass { margin-top: 8px; font-size: 12.5px; font-weight: 800; padding: 4px 10px; border-radius: 99px; display: inline-block; }
+.daily-pass.pass { background: #dcfce7; color: var(--ok); }
+.daily-pass.warn { background: #fef3c7; color: var(--warn); }
+.daily-pass.fail { background: #fee2e2; color: var(--danger); }
+
+/* ---------- theme swatches ---------- */
+.theme-swatches { display: flex; gap: 10px; flex-wrap: wrap; margin: 6px 0 10px; }
+.theme-dot {
+  width: 34px; height: 34px; border-radius: 50%; border: 3px solid transparent; cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0,0,0,.2);
+}
+.theme-dot.active { border-color: #1f2937; transform: scale(1.12); }
+.theme-custom { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+.theme-custom input { width: 56px; height: 36px; padding: 2px; border: 1px solid #d1d5db; border-radius: 8px; }
 
 .report-list { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
 .report-item {

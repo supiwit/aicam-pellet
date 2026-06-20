@@ -27,6 +27,20 @@
     { die: '1.8', min_mm: 2.0, max_mm: 3.0, target_pct: 60 },
     { die: '2.0', min_mm: 3.0, max_mm: 4.0, target_pct: 60 },
   ];
+  // โรงงานอาหารกุ้ง 3 แห่ง (เวียดนาม) — เก็บข้อมูลแยกกัน
+  const FACTORIES = [
+    { id: 'ben-tre', th: 'เบ๊นแจ (Bến Tre)', vi: 'Bến Tre', en: 'Bến Tre' },
+    { id: 'ca-mau',  th: 'ก่าเมา (Cà Mau)',  vi: 'Cà Mau',  en: 'Cà Mau' },
+    { id: 'bac-lieu', th: 'บ่ากเลียว (Bạc Liêu)', vi: 'Bạc Liêu', en: 'Bạc Liêu' },
+  ];
+  const factoryName = id => {
+    const f = FACTORIES.find(x => x.id === id);
+    return f ? (f[I18N.lang] || f.en) : id;
+  };
+
+  // ธีมสีหลัก (accent) — ค่าเริ่มต้นและพรีเซ็ต
+  const THEMES = ['#1b6e5a', '#e3000f', '#0ea5e9', '#7c3aed', '#d97706', '#0f766e', '#be123c', '#1e3a8a'];
+
   const DEFAULTS = {
     mmpp: 0,
     operator: '',
@@ -41,6 +55,9 @@
     demax: 10,
     pin: '1234',
     die: 'auto',
+    factory: 'ben-tre',
+    theme: '#1b6e5a',
+    reportFactory: '',
     specs: DEFAULT_SPECS,
   };
   const stored = JSON.parse(localStorage.getItem('aicam-settings') || '{}');
@@ -89,6 +106,19 @@
     return { spec: currentSpec(), auto: false };
   }
 
+  /* ---------------- ธีมสี ---------------- */
+  function hex2rgb(h) { const v = parseInt(h.slice(1), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; }
+  function rgb2hex(r, g, b) { return '#' + [r, g, b].map(x => Math.max(0, Math.min(255, Math.round(x))).toString(16).padStart(2, '0')).join(''); }
+  function mix(hex, target, amt) { const [r, g, b] = hex2rgb(hex); return rgb2hex(r + (target - r) * amt, g + (target - g) * amt, b + (target - b) * amt); }
+  function applyTheme(color) {
+    const root = document.documentElement.style;
+    root.setProperty('--green', color);
+    root.setProperty('--green-dark', mix(color, 0, 0.30));   // เข้มขึ้น
+    root.setProperty('--green-light', mix(color, 255, 0.86)); // อ่อนลง
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = color;
+  }
+
   /* ---------------- toast ---------------- */
   let toastTimer = null;
   function toast(msg) {
@@ -127,7 +157,6 @@
   }
 
   function initLock() {
-    $('lock-hint').hidden = String(settings.pin) !== '1234';
     $('lock-btn').addEventListener('click', tryUnlock);
     $('lock-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryUnlock(); });
     document.querySelectorAll('.lang-chip').forEach(chip => {
@@ -160,6 +189,7 @@
     initSettings();
     syncSettingsForm();
     populateDieSelect();
+    populateFactorySelect();
     updateCalibStatus();
     checkNet();
 
@@ -186,8 +216,18 @@
     $('lang-select').value = I18N.lang;
     updateCalibStatus();
     populateDieSelect();
+    populateFactorySelect();
     renderSpecEditor();
     if (state.results) renderResults(false);
+  }
+
+  /* ---------------- โรงงาน ---------------- */
+  function populateFactorySelect() {
+    const sel = $('factory-select');
+    if (!sel) return;
+    sel.innerHTML = FACTORIES.map(f => `<option value="${f.id}">${factoryName(f.id)}</option>`).join('');
+    sel.value = settings.factory || FACTORIES[0].id;
+    sel.onchange = () => { settings.factory = sel.value; saveSettings(); };
   }
 
   /* ---------------- tabs ---------------- */
@@ -642,13 +682,27 @@
   }
 
   async function shareReport(id, name, count, avgLen) {
+    if (!id) { toast(t('share_first')); return; }
     const text = t('share_text', { name: name || '', n: count, len: avgLen });
     const url = reportUrl(id);
-    if (navigator.share) {
-      try { await navigator.share({ title: 'AICAM', text, url }); return; } catch (e) { /* user cancelled */ }
+    // 1) Web Share API (มือถือ) — เฉพาะ secure context
+    if (navigator.share && window.isSecureContext) {
+      try { await navigator.share({ title: 'C.P. Vietnam', text, url }); return; }
+      catch (e) { if (e && e.name === 'AbortError') return; /* ผู้ใช้ยกเลิก */ }
     }
+    // 2) คัดลอกลิงก์ลงคลิปบอร์ด
     try {
       await navigator.clipboard.writeText(url);
+      toast(t('link_copied'));
+      return;
+    } catch { /* ตกไปวิธีสำรอง */ }
+    // 3) สำรอง: เลือกข้อความใน input ชั่วคราว
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
       toast(t('link_copied'));
     } catch {
       prompt('URL', url);
@@ -668,6 +722,7 @@
         const spec = state.results.spec;
         if ($('f-operator').value) { settings.operator = $('f-operator').value; saveSettings(); }
         const saved = await DB.saveSession({
+          factory: settings.factory || null,
           sample_name: $('f-sample').value || null,
           operator: $('f-operator').value || null,
           notes: $('f-notes').value || null,
@@ -795,7 +850,7 @@
         datasets: [
           {
             label: t('trend_len'), data: data.map(r => +r.avg_length_mm),
-            borderColor: '#1b6e5a', backgroundColor: 'rgba(27,110,90,.12)',
+            borderColor: settings.theme || '#1b6e5a', backgroundColor: mix(settings.theme || '#1b6e5a', 255, 0.85),
             tension: .35, fill: true, yAxisID: 'y',
           },
           {
@@ -816,16 +871,72 @@
     });
   }
 
+  /* แถบกรองโรงงาน */
+  function renderFactoryFilter() {
+    const box = $('factory-filter');
+    if (!box) return;
+    const chips = [{ id: '', label: t('factory_all') }]
+      .concat(FACTORIES.map(f => ({ id: f.id, label: factoryName(f.id) })));
+    box.innerHTML = chips.map(c =>
+      `<button class="fchip ${(settings.reportFactory || '') === c.id ? 'active' : ''}" data-fid="${c.id}">${c.label}</button>`
+    ).join('');
+    box.querySelectorAll('.fchip').forEach(b => b.addEventListener('click', () => {
+      settings.reportFactory = b.dataset.fid;
+      saveSettings();
+      renderFactoryFilter();
+      loadReports();
+    }));
+  }
+
+  /* สรุปผลรายวัน (ภาพรวม) จากรายการที่กรองแล้ว */
+  function renderDaily(rows) {
+    const box = $('daily-box'), list = $('daily-list');
+    if (!rows.length) { box.hidden = true; return; }
+    const byDay = {};
+    for (const r of rows) {
+      const key = new Date(r.created_at).toLocaleDateString();
+      (byDay[key] = byDay[key] || []).push(r);
+    }
+    const days = Object.keys(byDay).slice(0, 14); // ใหม่→เก่า (rows เรียงใหม่สุดก่อน)
+    box.hidden = false;
+    list.innerHTML = days.map(day => {
+      const g = byDay[day];
+      const lots = g.length;
+      const pellets = g.reduce((s, r) => s + (r.pellet_count || 0), 0);
+      const avgLen = g.reduce((s, r) => s + (+r.avg_length_mm || 0), 0) / lots;
+      const withSpec = g.filter(r => r.spec_pass != null);
+      const passN = withSpec.filter(r => r.spec_pass).length;
+      const passRate = withSpec.length ? Math.round(passN * 100 / withSpec.length) : null;
+      const insVals = g.filter(r => r.insize_pct != null).map(r => +r.insize_pct);
+      const avgIns = insVals.length ? (insVals.reduce((a, b) => a + b, 0) / insVals.length) : null;
+      const passCls = passRate == null ? '' : (passRate >= 80 ? 'pass' : passRate >= 50 ? 'warn' : 'fail');
+      return `
+        <div class="daily-card">
+          <div class="daily-date">${day}</div>
+          <div class="daily-metrics">
+            <span><b>${lots}</b> ${t('daily_lots')}</span>
+            <span><b>${pellets}</b> ${t('rep_items')}</span>
+            <span><b>${avgLen.toFixed(1)}</b> ${t('daily_avglen')} มม.</span>
+            ${avgIns != null ? `<span><b>${avgIns.toFixed(0)}%</b> Insize</span>` : ''}
+          </div>
+          ${passRate != null ? `<div class="daily-pass ${passCls}">${t('daily_pass')} ${passRate}%</div>` : ''}
+        </div>`;
+    }).join('');
+  }
+
   async function loadReports() {
     const list = $('report-list');
+    renderFactoryFilter();
     list.innerHTML = `<div class="empty">${t('rep_loading')}</div>`;
     try {
-      const rows = await DB.listSessions();
+      const rows = await DB.listSessions(300, settings.reportFactory || null);
       if (!rows.length) {
         $('trend-box').hidden = true;
-        list.innerHTML = `<div class="empty">🌾<br>${t('rep_empty')}</div>`;
+        $('daily-box').hidden = true;
+        list.innerHTML = `<div class="empty">🦐<br>${t('rep_empty')}</div>`;
         return;
       }
+      renderDaily(rows);
       renderTrend(rows.slice(0, 30));
       list.innerHTML = '';
       rows.forEach((r, idx) => {
@@ -839,7 +950,7 @@
           ${r.image_url ? `<img class="report-thumb" src="${r.image_url}" loading="lazy">` : '<div class="report-thumb"></div>'}
           <div class="report-info">
             <div class="report-title">${r.sample_name || t('rep_noname')}${r.die_size ? ` · Die ${r.die_size}` : ''}</div>
-            <div class="report-sub">${d}${r.operator ? ' · ' + r.operator : ''}</div>
+            <div class="report-sub">${d}${r.factory ? ' · 🏭 ' + factoryName(r.factory) : ''}${r.operator ? ' · ' + r.operator : ''}</div>
             <div class="report-stats">${r.pellet_count} ${t('rep_items')} · ${t('rep_avg')} ${(+r.avg_length_mm).toFixed(1)} mm · Ø ${(+r.avg_diameter_mm).toFixed(2)} mm</div>
           </div>
           ${passChip}`;
@@ -855,18 +966,25 @@
     $('btn-refresh').addEventListener('click', loadReports);
     $('btn-export-all').addEventListener('click', async () => {
       try {
-        const rows = await DB.listSessions(1000);
+        const rows = await DB.listSessions(1000, settings.reportFactory || null);
         downloadCsv('pellet-summary.csv', [
-          [t('csv_date'), t('csv_sample'), t('csv_operator'), t('csv_count'),
+          [t('factory_label'), t('csv_date'), t('csv_sample'), t('csv_operator'), t('csv_count'),
            t('csv_avg_len'), t('csv_avg_dia'), t('csv_die'), t('csv_insize'), t('csv_result')],
-          ...rows.map(r => [new Date(r.created_at).toLocaleString(), r.sample_name, r.operator,
+          ...rows.map(r => [r.factory ? factoryName(r.factory) : '', new Date(r.created_at).toLocaleString(), r.sample_name, r.operator,
             r.pellet_count, r.avg_length_mm, r.avg_diameter_mm, r.die_size ?? '',
             r.insize_pct ?? '', r.spec_pass == null ? '' : (r.spec_pass ? t('csv_pass') : t('csv_fail'))]),
         ]);
       } catch (err) { alert(t('export_fail') + ': ' + (err.message || err)); }
     });
-    $('modal-close').addEventListener('click', () => { $('modal').hidden = true; });
-    $('modal').addEventListener('click', e => { if (e.target === $('modal')) $('modal').hidden = true; });
+    const closeModal = () => {
+      $('modal').hidden = true;
+      // ล้าง ?report= ออกจาก URL กันค้าง/เปิดซ้ำตอนรีเฟรช
+      if (new URLSearchParams(location.search).get('report')) {
+        history.replaceState(null, '', location.pathname);
+      }
+    };
+    $('modal-close').addEventListener('click', closeModal);
+    $('modal').addEventListener('click', e => { if (e.target === $('modal')) closeModal(); });
   }
 
   async function openReport(id) {
@@ -1005,13 +1123,35 @@
     $('s-userefcolor').checked = settings.userefcolor;
     $('s-demax').value = settings.demax;
     $('s-pin').value = settings.pin;
+    $('s-theme').value = settings.theme;
+    renderThemeSwatches();
     renderSpecEditor();
+  }
+
+  function renderThemeSwatches() {
+    const box = $('theme-swatches');
+    if (!box) return;
+    box.innerHTML = THEMES.map(c =>
+      `<button class="theme-dot ${settings.theme === c ? 'active' : ''}" data-color="${c}" style="background:${c}"></button>`
+    ).join('');
+    box.querySelectorAll('.theme-dot').forEach(b => b.addEventListener('click', () => {
+      settings.theme = b.dataset.color;
+      $('s-theme').value = b.dataset.color;
+      applyTheme(settings.theme);
+      saveSettings();
+      renderThemeSwatches();
+    }));
   }
 
   function initSettings() {
     $('btn-add-spec').addEventListener('click', () => {
       settings.specs.push({ die: '', min_mm: 0, max_mm: 0, target_pct: 60 });
       renderSpecEditor();
+    });
+    $('s-theme').addEventListener('input', e => {
+      settings.theme = e.target.value;
+      applyTheme(settings.theme);
+      renderThemeSwatches();
     });
     $('btn-save-settings').addEventListener('click', () => {
       settings.mmpp = parseFloat($('s-mmpp').value) || 0;
@@ -1025,6 +1165,7 @@
       settings.refcolor = $('s-refcolor').value;
       settings.userefcolor = $('s-userefcolor').checked;
       settings.demax = parseFloat($('s-demax').value) || DEFAULTS.demax;
+      settings.theme = $('s-theme').value || DEFAULTS.theme;
       const pin = $('s-pin').value.trim();
       if (/^\d{4,8}$/.test(pin)) settings.pin = pin;
       settings.specs = settings.specs.filter(s => s.die !== '' && s.max_mm > 0);
@@ -1050,6 +1191,7 @@
   }
 
   /* ---------------- init ---------------- */
+  applyTheme(settings.theme || DEFAULTS.theme);
   I18N.apply();
   initLock();
   if (isUnlocked()) showApp();

@@ -15,27 +15,23 @@
 <div id="lock-screen" class="lock-screen">
   <div class="lock-card">
     <div class="lock-logo">
-      <svg viewBox="0 0 120 120" width="86" height="86">
+      <svg viewBox="0 0 120 120" width="104" height="104" class="cp-mark">
         <defs>
-          <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stop-color="#34d399"/><stop offset="1" stop-color="#0ea5e9"/>
+          <linearGradient id="cpL" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#e3000f"/><stop offset="1" stop-color="#ff8a00"/>
           </linearGradient>
         </defs>
-        <circle cx="60" cy="60" r="54" fill="none" stroke="url(#lg)" stroke-width="5" class="lock-ring"/>
-        <g class="lock-pellets">
-          <rect x="32" y="42" width="26" height="11" rx="5" fill="#facc15" transform="rotate(-18 45 47)"/>
-          <rect x="58" y="52" width="30" height="11" rx="5" fill="#fbbf24" transform="rotate(12 73 57)"/>
-          <rect x="40" y="66" width="34" height="11" rx="5" fill="#f59e0b" transform="rotate(-6 57 71)"/>
-        </g>
+        <rect x="10" y="10" width="100" height="100" rx="24" fill="url(#cpL)" class="lock-ring"/>
+        <text x="60" y="76" font-size="52" font-weight="800" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif">CP</text>
       </svg>
     </div>
-    <h1 data-i18n="lock_title">AICAM Pellet Analyzer</h1>
+    <h1>C.P. Vietnam</h1>
+    <p class="cp-tagline">Shrimp Feed Quality Control</p>
     <p data-i18n="lock_sub">กรอกรหัสผ่านเพื่อเข้าใช้งาน</p>
     <input type="password" id="lock-input" inputmode="numeric" autocomplete="off" data-i18n-ph="lock_placeholder" placeholder="รหัสผ่าน">
     <label class="lock-remember"><input type="checkbox" id="lock-remember"> <span data-i18n="lock_remember">จดจำเครื่องนี้ 7 วัน</span></label>
     <button class="btn primary big" id="lock-btn" data-i18n="lock_btn">เข้าใช้งาน</button>
     <div id="lock-error" class="lock-error"></div>
-    <div id="lock-hint" class="lock-hint" hidden data-i18n="lock_default_hint"></div>
     <div class="lock-langs">
       <button class="lang-chip" data-lang="th">ไทย</button>
       <button class="lang-chip" data-lang="vi">Tiếng Việt</button>
@@ -47,7 +43,18 @@
 <div id="app" hidden>
 
 <header class="topbar">
-  <div class="logo">🌾 AICAM <span>Pellet Analyzer</span></div>
+  <div class="logo">
+    <svg viewBox="0 0 100 100" width="32" height="32" class="cp-mark-sm" aria-label="C.P.">
+      <defs>
+        <linearGradient id="cpH" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#e3000f"/><stop offset="1" stop-color="#ff8a00"/>
+        </linearGradient>
+      </defs>
+      <rect x="6" y="6" width="88" height="88" rx="20" fill="url(#cpH)"/>
+      <text x="50" y="64" font-size="44" font-weight="800" text-anchor="middle" fill="#fff" font-family="Arial, sans-serif">CP</text>
+    </svg>
+    <span class="brand">C.P. Vietnam <span>Shrimp Feed QC</span></span>
+  </div>
   <div class="topbar-right">
     <select id="lang-select" class="lang-select" title="Language">
       <option value="th">ไทย</option>
@@ -83,6 +90,10 @@
       <button class="btn small" id="btn-calibrate" data-i18n="cal_btn">📏 คาลิเบรต</button>
     </div>
     <p class="hint" id="calib-hint" hidden data-i18n="cal_hint"></p>
+    <div class="die-row">
+      <label class="die-label" data-i18n="factory_label">โรงงาน</label>
+      <select id="factory-select"></select>
+    </div>
     <div class="die-row">
       <label class="die-label" data-i18n="die_label">ไซซ์อาหาร (Die)</label>
       <select id="die-select"></select>
@@ -201,14 +212,22 @@
   <section class="card anim-in">
     <h2 data-i18n="rep_title">📊 รายงานผลการวัด</h2>
     <p class="hint" data-i18n="rep_hint"></p>
+    <div id="factory-filter" class="factory-filter"></div>
     <div class="btn-row">
       <button class="btn small" id="btn-refresh" data-i18n="rep_refresh">🔄 โหลดใหม่</button>
       <button class="btn small" id="btn-export-all" data-i18n="rep_export">⬇️ CSV สรุปทั้งหมด</button>
     </div>
+
+    <div id="daily-box" hidden>
+      <h3 data-i18n="daily_title">📅 สรุปผลรายวัน (ภาพรวม)</h3>
+      <div id="daily-list" class="daily-list"></div>
+    </div>
+
     <div id="trend-box" hidden>
       <h3 data-i18n="trend_title">📈 แนวโน้มคุณภาพย้อนหลัง</h3>
       <div class="chart-box"><canvas id="chart-trend"></canvas></div>
     </div>
+    <h3 data-i18n="rep_list_title">รายการล่าสุด</h3>
     <div id="report-list" class="report-list"></div>
   </section>
 </main>
@@ -259,6 +278,13 @@
         <input type="text" id="s-pin" inputmode="numeric" maxlength="8" placeholder="1234">
       </label>
     </div>
+
+    <h3 data-i18n="s_theme_title">🎨 ธีมและสีสัน</h3>
+    <p class="hint" data-i18n="s_theme_hint"></p>
+    <div id="theme-swatches" class="theme-swatches"></div>
+    <label class="theme-custom"><span data-i18n="s_theme_custom"></span>
+      <input type="color" id="s-theme" value="#1b6e5a">
+    </label>
 
     <h3 data-i18n="s_spec_title">ตารางเป้าหมายไซซ์อาหาร</h3>
     <p class="hint" data-i18n="s_spec_hint"></p>
