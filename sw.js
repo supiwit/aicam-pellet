@@ -1,5 +1,5 @@
 /* AICAM Pellet Analyzer — service worker (PWA offline shell) */
-const CACHE = 'aicam-v12';
+const CACHE = 'aicam-v13';
 const ASSETS = [
   './', 'index.html',
   'css/style.css',
@@ -26,11 +26,25 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
   // ข้าม API ของ Supabase (ต้องสด/ออนไลน์เสมอ)
   if (url.hostname.endsWith('supabase.co')) return;
-  // app shell: cache-first, อัปเดตเบื้องหลัง
+
+  // หน้าเว็บ/HTML: network-first กันค้างจากเชลล์เก่า/เสีย แล้ว fallback แคช
+  const isDoc = req.mode === 'navigate' || req.destination === 'document' ||
+                url.pathname.endsWith('.html') || url.pathname.endsWith('/');
+  if (isDoc) {
+    e.respondWith(
+      fetch(req).then(res => {
+        if (res && res.status === 200) { const c = res.clone(); caches.open(CACHE).then(x => x.put(req, c)).catch(() => {}); }
+        return res;
+      }).catch(() => caches.match(req).then(r => r || caches.match('index.html')))
+    );
+    return;
+  }
+
+  // static อื่นๆ: cache-first + อัปเดตเบื้องหลัง (เก็บเฉพาะ response ที่ดี)
   e.respondWith(
     caches.match(req).then(cached => {
       const net = fetch(req).then(res => {
-        if (res && res.status === 200) {
+        if (res && res.status === 200 && res.type !== 'opaque') {
           const copy = res.clone();
           caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
         }
@@ -40,3 +54,5 @@ self.addEventListener('fetch', e => {
     })
   );
 });
+
+self.addEventListener('message', e => { if (e.data === 'skipWaiting') self.skipWaiting(); });

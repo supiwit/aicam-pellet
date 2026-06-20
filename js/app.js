@@ -7,6 +7,12 @@
   const $ = id => document.getElementById(id);
   const t = (k, v) => I18N.t(k, v);
 
+  // ลดอนิเมชั่นกราฟบนมือถือ/จอเล็ก เพื่อลดอาการค้าง
+  if (typeof Chart !== 'undefined') {
+    Chart.defaults.animation = (window.innerWidth < 700) ? false : { duration: 350 };
+    Chart.defaults.devicePixelRatio = Math.min(2, window.devicePixelRatio || 1);
+  }
+
   /* ---------------- state ---------------- */
   const state = {
     img: null,
@@ -95,11 +101,21 @@
     { id: 'ben-tre', th: 'เบ๊นแจ (Bến Tre)', vi: 'Bến Tre', en: 'Bến Tre' },
     { id: 'ca-mau',  th: 'ก่าเมา (Cà Mau)',  vi: 'Cà Mau',  en: 'Cà Mau' },
     { id: 'bau-xeo', th: 'บ่าวแซว (Bàu Xéo)', vi: 'Bàu Xéo', en: 'Bàu Xéo' },
+    { id: 'can-tho', th: 'เกิ่นเทอ (Cần Thơ)', vi: 'Cần Thơ', en: 'Cần Thơ' },
   ];
   const factoryName = id => {
     const f = FACTORIES.find(x => x.id === id);
     return f ? (f[I18N.lang] || f.en) : id;
   };
+
+  // ตำแหน่ง/จุดเก็บตัวอย่าง (stage)
+  const STAGES = [
+    { id: '', th: '— ไม่ระบุจุด —', vi: '— Không chọn —', en: '— No stage —' },
+    { id: 'machine', th: 'หน้าเครื่อง', vi: 'Tại máy', en: 'At machine' },
+    { id: 'screen', th: 'หลังร่อนขนาด', vi: 'Sau sàng', en: 'After screening' },
+    { id: 'packing', th: 'แพ็คกิ้ง', vi: 'Đóng gói', en: 'Packing' },
+  ];
+  const stageName = id => { const s = STAGES.find(x => x.id === id); return s ? (s[I18N.lang] || s.en) : (id || ''); };
 
   // ธีมสีหลัก (accent) — ค่าเริ่มต้นและพรีเซ็ต
   const THEMES = ['#1b6e5a', '#e3000f', '#0ea5e9', '#7c3aed', '#d97706', '#0f766e', '#be123c', '#1e3a8a'];
@@ -121,7 +137,10 @@
     factory: 'ben-tre',
     product: 'shrimp',
     shift: '',
+    stage: '',
     refObject: 'coin1',
+    colorGain: null,     // ปรับเทียบสี white/grey card {r,g,b}
+    webhook: '',         // URL แจ้งเตือน SPC (Discord/Slack/อื่นๆ)
     theme: '#1b6e5a',
     reportFactory: '',
     sieveUnit: 'mm',   // 'mm' หรือ 'mesh'
@@ -267,9 +286,30 @@
     return false;
   }
 
+  let pickedUser = null;  // ผู้ใช้ที่เลือกบนหน้า login
+
+  function renderLockUsers() {
+    const box = $('lock-users');
+    if (!box) return;
+    const users = settings.users || [];
+    box.innerHTML = users.map((u, i) =>
+      `<button class="luser ${i === 0 ? 'active' : ''}" data-ui="${i}">${u.role === 'admin' ? '👑' : '👤'} ${u.name}</button>`
+    ).join('');
+    pickedUser = users[0] || null;
+    box.querySelectorAll('.luser').forEach(b => b.addEventListener('click', () => {
+      pickedUser = settings.users[+b.dataset.ui];
+      box.querySelectorAll('.luser').forEach(x => x.classList.toggle('active', x === b));
+      $('lock-input').value = '';
+      $('lock-input').focus();
+    }));
+  }
+
   function tryUnlock() {
     const input = $('lock-input');
-    const u = findUserByPin(input.value);
+    // ถ้าเลือกผู้ใช้ไว้: ตรวจรหัสกับผู้ใช้นั้น · ไม่งั้นค้นทุกผู้ใช้
+    let u = null;
+    if (pickedUser && String(pickedUser.pin) === String(input.value)) u = pickedUser;
+    else u = findUserByPin(input.value);
     if (u) {
       sessionStorage.setItem('aicam-unlocked', '1');
       setCurrentUser(u);
@@ -291,6 +331,7 @@
   }
 
   function initLock() {
+    renderLockUsers();
     $('lock-btn').addEventListener('click', tryUnlock);
     $('lock-input').addEventListener('keydown', e => { if (e.key === 'Enter') tryUnlock(); });
     document.querySelectorAll('.lang-chip').forEach(chip => {
@@ -299,8 +340,17 @@
         I18N.setLang(chip.dataset.lang);
         document.querySelectorAll('.lang-chip').forEach(c =>
           c.classList.toggle('active', c.dataset.lang === chip.dataset.lang));
+        renderLockUsers();
       });
     });
+  }
+
+  function logout() {
+    sessionStorage.removeItem('aicam-unlocked');
+    sessionStorage.removeItem('aicam-user');
+    localStorage.removeItem('aicam-unlock-until');
+    localStorage.removeItem('aicam-user-remember');
+    location.reload();
   }
 
   function showApp() {
@@ -326,12 +376,15 @@
     populateDieSelect();
     populateFactorySelect();
     populateShiftSelect();
+    populateStageSelect();
     populateRefSelect();
     initAutoCal();
+    initColorCal();
     applyRole();
     updateUserBadge();
     syncOfflineBadge();
     Learn.render();
+    $('btn-logout').addEventListener('click', () => { if (confirm(t('logout_confirm'))) logout(); });
     updateCalibStatus();
     checkNet();
 
@@ -369,6 +422,7 @@
     populateDieSelect();
     populateFactorySelect();
     populateShiftSelect();
+    populateStageSelect();
     populateRefSelect();
     renderSpecEditor();
     Learn.render();
@@ -409,6 +463,37 @@
     sel.value = settings.refObject || REF_OBJECTS[0].id;
     sel.onchange = () => { settings.refObject = sel.value; saveSettings(); };
   }
+  function populateStageSelect() {
+    const sel = $('stage-select');
+    if (!sel) return;
+    sel.innerHTML = STAGES.map(s => `<option value="${s.id}">${stageName(s.id)}</option>`).join('');
+    sel.value = settings.stage || '';
+    sel.onchange = () => { settings.stage = sel.value; saveSettings(); };
+  }
+
+  /* ---------------- ปรับเทียบสีจากการ์ดเทา/ขาว (ข้อ 7) ---------------- */
+  function initColorCal() {
+    const btn = $('btn-colorcal');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      if (!state.img) { alert(t('cal_alert')); return; }
+      // วัดสีเฉลี่ยทั้งภาพ (ถือว่าเป็นการ์ดเทา/ขาวเต็มเฟรม) แล้วคำนวณ gain ให้เป็นกลาง
+      const c = document.createElement('canvas');
+      const s = Math.min(1, 200 / Math.max(state.img.naturalWidth, state.img.naturalHeight));
+      c.width = Math.max(1, Math.round(state.img.naturalWidth * s));
+      c.height = Math.max(1, Math.round(state.img.naturalHeight * s));
+      const cx = c.getContext('2d'); cx.drawImage(state.img, 0, 0, c.width, c.height);
+      const d = cx.getImageData(0, 0, c.width, c.height).data;
+      let r = 0, g = 0, b = 0, n = 0;
+      for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+      r /= n; g /= n; b /= n;
+      const grey = (r + g + b) / 3;
+      if (grey < 25) { toast(t('cal_color_fail')); return; }
+      settings.colorGain = { r: grey / (r || 1), g: grey / (g || 1), b: grey / (b || 1) };
+      saveSettings();
+      toast(t('cal_color_ok'));
+    });
+  }
 
   /* ---------------- คาลิเบรตอัตโนมัติ (ข้อ 1) ---------------- */
   function initAutoCal() {
@@ -442,6 +527,38 @@
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === tabId));
     document.querySelectorAll('.tab').forEach(tb => tb.classList.toggle('active', tb.id === tabId));
     if (tabId === 'tab-reports') loadReports();
+    if (tabId === 'tab-settings') renderStorageMeter();
+  }
+
+  /* ---------------- มาตรวัดพื้นที่เก็บออนไลน์ (ข้อ 2) ---------------- */
+  async function renderStorageMeter() {
+    const el = $('storage-meter');
+    if (!el) return;
+    try {
+      const n = await DB.countSessions();
+      const perKB = 230;                  // ภาพ + ข้อมูลเฉลี่ยต่อล็อต (KB)
+      const usedMB = n * perKB / 1024;
+      const capMB = 1024;                 // Supabase free 1 GB
+      const pct = Math.min(100, usedMB / capMB * 100);
+      const cls = pct >= 85 ? 'fail' : pct >= 60 ? 'warn' : 'ok';
+      el.innerHTML = `
+        <div class="sm-row"><span>☁️ ${t('storage_used', { n })}</span><b>${usedMB.toFixed(0)} / ${capMB} MB</b></div>
+        <div class="sm-bar"><div class="sm-fill ${cls}" style="width:${pct.toFixed(1)}%"></div></div>
+        <div class="hint">${t('storage_left', { n: Math.max(0, Math.round((capMB - usedMB) * 1024 / perKB)) })}</div>`;
+    } catch (e) { el.innerHTML = ''; }
+  }
+
+  /* ---------------- แจ้งเตือน SPC ผ่าน webhook (ข้อ 5) ---------------- */
+  let lastAlertKey = '';
+  function fireWebhook(msg) {
+    const url = settings.webhook;
+    if (!url || !/^https?:\/\//.test(url)) return;
+    if (lastAlertKey === msg) return;     // กันยิงซ้ำ
+    lastAlertKey = msg;
+    try {
+      fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: msg, text: msg }) }).catch(() => {});
+    } catch (e) {}
   }
   function initTabs() {
     document.querySelectorAll('.nav-btn').forEach(btn =>
@@ -661,7 +778,7 @@
 
     renderSpecPanel(animate);
     renderYieldPanel(animate);
-    renderCharts('chart-bar', 'chart-donut', stats, state.charts);
+    renderCharts('chart-bar', 'chart-donut', stats, state.charts, state.results.spec);
     renderDiaChart('chart-dia', stats, state.charts);
     renderDistTable($('tbl-dist').querySelector('tbody'), stats.distribution);
     renderColor(stats);
@@ -770,10 +887,21 @@
   /* ---------------- charts ---------------- */
   const PALETTE = ['#86efac', '#34d399', '#3b82f6', '#6366f1', '#a855f7', '#ca8a04', '#f43f5e', '#94a3b8'];
 
-  function renderCharts(barId, donutId, stats, store) {
+  function renderCharts(barId, donutId, stats, store, spec) {
     const labels = stats.distribution.map(d => d.label);
     const counts = stats.distribution.map(d => d.count);
-    const colors = labels.map((_, i) => PALETTE[i % PALETTE.length]);
+    // ลงสีแท่งตามเป้าหมาย (histogram + target): ในสเปก=เขียว · ต่ำกว่า=ส้ม · เกิน=แดง
+    let colors;
+    if (spec && spec.min_mm != null) {
+      colors = stats.distribution.map(d => {
+        const lo = d.min_mm ?? 0, hi = d.max_mm ?? Infinity, mid = (lo + (hi === null ? lo : hi)) / 2;
+        if (hi <= spec.min_mm) return '#f59e0b';            // under
+        if (lo >= spec.max_mm) return '#ef4444';            // over
+        return '#16a34a';                                    // in-spec
+      });
+    } else {
+      colors = labels.map((_, i) => PALETTE[i % PALETTE.length]);
+    }
 
     if (store[barId]) store[barId].destroy();
     store[barId] = new Chart($(barId), {
@@ -781,7 +909,7 @@
       data: { labels, datasets: [{ data: counts, backgroundColor: colors, borderRadius: 4 }] },
       options: {
         responsive: true, maintainAspectRatio: false,
-        plugins: { legend: { display: false }, title: { display: true, text: t('chart_len_title') } },
+        plugins: { legend: { display: false }, title: { display: true, text: t('chart_len_title') + (spec ? ` · ${t('spec_range', { min: spec.min_mm, max: spec.max_mm })}` : '') } },
         scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
       },
     });
@@ -887,8 +1015,18 @@
   function renderColor(stats) {
     const ac = stats.avg_color;
     if (!ac) return;
+    // ใช้ค่าปรับเทียบสี (white/grey card) ถ้ามี
+    const gain = settings.colorGain;
+    if (gain && !ac._gained) {
+      ac.r = Math.max(0, Math.min(255, Math.round(ac.r * gain.r)));
+      ac.g = Math.max(0, Math.min(255, Math.round(ac.g * gain.g)));
+      ac.b = Math.max(0, Math.min(255, Math.round(ac.b * gain.b)));
+      const lab2 = Analyzer.rgb2lab(ac.r, ac.g, ac.b);
+      ac.lab = { l: +lab2.l.toFixed(2), a: +lab2.a.toFixed(2), b: +lab2.b.toFixed(2) };
+      ac._gained = true;
+    }
     $('swatch-avg').style.background = `rgb(${ac.r},${ac.g},${ac.b})`;
-    $('color-rgb').textContent = `RGB(${ac.r}, ${ac.g}, ${ac.b})`;
+    $('color-rgb').textContent = `RGB(${ac.r}, ${ac.g}, ${ac.b})${gain ? ' ⚖︎' : ''}`;
     const refBox = $('ref-color-box'), verdict = $('color-verdict');
 
     const lab = ac.lab;
@@ -1025,7 +1163,7 @@
       btn.disabled = true;
       st.className = 'save-status'; st.textContent = t('saving');
       try {
-        const blob = await new Promise(r => state.results.annotated.toBlob(r, 'image/jpeg', 0.85));
+        const blob = await compressCanvas(state.results.annotated);
         const s = state.results.stats;
         const sr = state.results.specResult;
         const spec = state.results.spec;
@@ -1034,6 +1172,7 @@
           factory: settings.factory || null,
           product: settings.product || null,
           shift: settings.shift || null,
+          stage: settings.stage || null,
           fines_pct: state.results.yield ? state.results.yield.under_vol : null,
           pdi: parseFloat($('f-pdi').value) || null,
           sample_name: $('f-sample').value || null,
@@ -1104,6 +1243,21 @@
     });
 
     $('btn-pdf').addEventListener('click', () => { if (state.results) exportPDF(); });
+  }
+
+  /* ---------------- บีบอัดรูปก่อนอัปโหลด (ข้อ 1) — ยืดพื้นที่เก็บ ---------------- */
+  function compressCanvas(src) {
+    const MAXW = 1100;                       // จำกัดความกว้างรูปที่บันทึก
+    let c = src;
+    if (src.width > MAXW) {
+      const s = MAXW / src.width;
+      c = document.createElement('canvas');
+      c.width = MAXW; c.height = Math.round(src.height * s);
+      c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+    }
+    // ใช้ WebP ถ้ารองรับ (เล็กกว่า JPEG ~30%) ไม่งั้น JPEG
+    const webp = c.toDataURL('image/webp', 0.7).startsWith('data:image/webp');
+    return new Promise(r => c.toBlob(r, webp ? 'image/webp' : 'image/jpeg', 0.72));
   }
 
   /* ---------------- PDF (พิมพ์/บันทึก) ข้อ 4 ---------------- */
@@ -1272,6 +1426,7 @@
     if (recent.length >= 2 && fails >= 2) {
       alertEl.hidden = false;
       alertEl.textContent = t('spc_warn', { n: fails });
+      fireWebhook('AICAM SPC: ' + t('spc_warn', { n: fails }) + ' — ' + factoryName(settings.reportFactory || settings.factory));
     } else alertEl.hidden = true;
   }
 
@@ -1401,7 +1556,7 @@
           ${r.image_url ? `<img class="report-thumb" src="${r.image_url}" loading="lazy">` : '<div class="report-thumb"></div>'}
           <div class="report-info">
             <div class="report-title">${r.sample_name || t('rep_noname')}${r.die_size ? ` · Die ${r.die_size}` : ''}</div>
-            <div class="report-sub">${d}${r.factory ? ' · 🏭 ' + factoryName(r.factory) : ''}${r.operator ? ' · ' + r.operator : ''}</div>
+            <div class="report-sub">${d}${r.factory ? ' · 🏭 ' + factoryName(r.factory) : ''}${r.stage ? ' · 📍 ' + stageName(r.stage) : ''}${r.operator ? ' · ' + r.operator : ''}</div>
             <div class="report-stats">${r.pellet_count} ${t('rep_items')} · ${t('rep_avg')} ${(+r.avg_length_mm).toFixed(1)} mm · Ø ${(+r.avg_diameter_mm).toFixed(2)} mm</div>
           </div>
           ${passChip}`;
@@ -1641,6 +1796,7 @@
     $('s-refcolor').value = settings.refcolor;
     $('s-userefcolor').checked = settings.userefcolor;
     $('s-demax').value = settings.demax;
+    $('s-webhook').value = settings.webhook || '';
     $('s-theme').value = settings.theme;
     $('s-sieveunit').value = settings.sieveUnit || 'mm';
     renderThemeSwatches();
@@ -1695,6 +1851,7 @@
       settings.refcolor = $('s-refcolor').value;
       settings.userefcolor = $('s-userefcolor').checked;
       settings.demax = parseFloat($('s-demax').value) || DEFAULTS.demax;
+      settings.webhook = $('s-webhook').value.trim();
       settings.theme = $('s-theme').value || DEFAULTS.theme;
       settings.users = settings.users.filter(u => u.name && /^\d{4,8}$/.test(String(u.pin)));
       if (!settings.users.length) settings.users = [{ name: 'Admin', pin: '1234', role: 'admin' }];
@@ -1735,14 +1892,7 @@
       b.hidden = false;
       b.textContent = (state.currentUser.role === 'admin' ? '👑 ' : '👤 ') + state.currentUser.name;
     } else b.hidden = true;
-    b.onclick = () => {
-      if (!confirm(t('logout_confirm'))) return;
-      sessionStorage.removeItem('aicam-unlocked');
-      sessionStorage.removeItem('aicam-user');
-      localStorage.removeItem('aicam-unlock-until');
-      localStorage.removeItem('aicam-user-remember');
-      location.reload();
-    };
+    b.onclick = () => { if (confirm(t('logout_confirm'))) logout(); };
   }
   function applyRole() {
     // ผู้ที่ไม่ใช่ admin: ซ่อนปุ่มบันทึกตั้งค่า + ปุ่มเพิ่ม/แก้สเปก-ผู้ใช้

@@ -12,7 +12,7 @@
 
 const Analyzer = (() => {
 
-  const PROC_MAX = 1800; // ย่อภาพให้ด้านยาวสุดไม่เกินนี้ก่อนประมวลผล
+  const PROC_MAX = 1500; // ย่อภาพให้ด้านยาวสุดไม่เกินนี้ก่อนประมวลผล (ลดภาระมือถือ/กันค้าง)
 
   function toProcCanvas(img) {
     const ow = img.naturalWidth || img.width;

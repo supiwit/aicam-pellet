@@ -14,9 +14,10 @@ const DB = (() => {
     let image_url = null;
     let image_path = null;
     if (imageBlob) {
-      image_path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+      const ext = (imageBlob.type && imageBlob.type.includes('webp')) ? 'webp' : 'jpg';
+      image_path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
       const { error: upErr } = await client.storage.from(BUCKET)
-        .upload(image_path, imageBlob, { contentType: 'image/jpeg' });
+        .upload(image_path, imageBlob, { contentType: imageBlob.type || 'image/jpeg' });
       if (upErr) throw upErr;
       image_url = client.storage.from(BUCKET).getPublicUrl(image_path).data.publicUrl;
     }
@@ -65,5 +66,13 @@ const DB = (() => {
     return !error;
   }
 
-  return { saveSession, listSessions, getSession, deleteSession, ping };
+  async function countSessions() {
+    const { count, error } = await client
+      .from('measurement_sessions')
+      .select('id', { count: 'exact', head: true });
+    if (error) throw error;
+    return count || 0;
+  }
+
+  return { saveSession, listSessions, getSession, deleteSession, ping, countSessions };
 })();
