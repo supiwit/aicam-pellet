@@ -141,10 +141,6 @@
       <select id="factory-select"></select>
     </div>
     <div class="die-row">
-      <label class="die-label" data-i18n="product_label">ชนิดอาหาร</label>
-      <select id="product-select"></select>
-    </div>
-    <div class="die-row">
       <label class="die-label" data-i18n="shift_label">กะ</label>
       <select id="shift-select"></select>
     </div>
@@ -422,6 +418,15 @@
   </section>
 </main>
 
+<!-- ============ TAB: ความรู้ ============ -->
+<main id="tab-learn" class="tab">
+  <section class="card anim-in">
+    <h2 data-i18n="learn_title">📚 ความรู้ & หลักการ</h2>
+    <p class="hint" data-i18n="learn_intro"></p>
+    <div id="learn-list" class="learn-list"></div>
+  </section>
+</main>
+
 <!-- Modal ดูรายงานละเอียด -->
 <div id="modal" class="modal" hidden>
   <div class="modal-body">
@@ -456,6 +461,7 @@
 <nav class="bottom-nav">
   <button class="nav-btn active" data-tab="tab-measure">📷<span data-i18n="nav_measure">วัดขนาด</span></button>
   <button class="nav-btn" data-tab="tab-reports">📊<span data-i18n="nav_reports">รายงาน</span></button>
+  <button class="nav-btn" data-tab="tab-learn">📚<span data-i18n="nav_learn">ความรู้</span></button>
   <button class="nav-btn" data-tab="tab-settings">⚙️<span data-i18n="nav_settings">ตั้งค่า</span></button>
 </nav>
 
@@ -465,6 +471,7 @@
 <script src="js/analyzer.js"></script>
 <script src="js/db.js"></script>
 <script src="js/chatbot.js"></script>
+<script src="js/learn.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

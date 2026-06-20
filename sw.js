@@ -1,9 +1,9 @@
 /* AICAM Pellet Analyzer — service worker (PWA offline shell) */
-const CACHE = 'aicam-v11';
+const CACHE = 'aicam-v12';
 const ASSETS = [
   './', 'index.html',
   'css/style.css',
-  'js/i18n.js', 'js/analyzer.js', 'js/db.js', 'js/chatbot.js', 'js/app.js',
+  'js/i18n.js', 'js/analyzer.js', 'js/db.js', 'js/chatbot.js', 'js/learn.js', 'js/app.js',
   'manifest.json', 'icon.svg',
   'https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js',
   'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js',

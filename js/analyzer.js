@@ -289,7 +289,12 @@ const Analyzer = (() => {
    *  - Ø        = Min Feret diameter
    *  - solidity = พื้นที่จริง / พื้นที่ convex hull (ใช้คัดก้อนที่เป็นเม็ดติดกัน)
    */
-  function measureComponent(px, w, data) {
+  function measureComponent(px, w, data, core) {
+    // ตัดพิกเซลเงา/แสงนุ่มขอบเม็ดออกก่อนวัด (วัดเฉพาะเนื้อเม็ดจริง)
+    if (core) {
+      const f = px.filter(i => core[i]);
+      if (f.length >= px.length * 0.4) px = f;
+    }
     const n = px.length;
     let minY = 1e9, maxY = -1e9;
     for (const i of px) { const y = (i / w) | 0; if (y < minY) minY = y; if (y > maxY) maxY = y; }
@@ -401,9 +406,23 @@ const Analyzer = (() => {
     else if (opts.polarity === 'light') fgBright = false;
     else fgBright = bright < (w * h - bright);
     let mask = new Uint8Array(w * h);
-    for (let i = 0; i < mask.length; i++) mask[i] = (gray[i] > thr) === fgBright ? 1 : 0;
+    let fgSum = 0, fgN = 0;
+    for (let i = 0; i < mask.length; i++) {
+      const fg = (gray[i] > thr) === fgBright;
+      mask[i] = fg ? 1 : 0;
+      if (fg) { fgSum += gray[i]; fgN++; }
+    }
     mask = erodeDilate(erodeDilate(mask, w, h, 'erode'), w, h, 'dilate');
     mask = fillHoles(mask, w, h);
+
+    // ---- core mask: ตัดขอบเงา/แสงนุ่ม (วัดเฉพาะเนื้อเม็ด ไม่กินเงา) ----
+    const fgMean = fgN ? fgSum / fgN : thr;
+    const CORE = 0.30;
+    const core = new Uint8Array(w * h);
+    for (let i = 0; i < core.length; i++) {
+      core[i] = (fgBright ? gray[i] > thr + CORE * (fgMean - thr)
+                          : gray[i] < thr - CORE * (thr - fgMean)) ? 1 : 0;
+    }
 
     // ---- connected components ----
     const minLenMm = opts.minLenMm ?? 2;
@@ -434,7 +453,7 @@ const Analyzer = (() => {
         if (y < h - 1 && mask[i + w] && !labels[i + w]) { labels[i + w] = nextLabel; stack[sp++] = i + w; }
       }
       if (px.length < minAreaPx) continue;
-      const m = measureComponent(px, w, data);
+      const m = measureComponent(px, w, data, core);
       m.px = px;
       m.touchBorder = touchBorder;
       m.lenMm = m.lengthPx * mmpp;
@@ -692,6 +711,7 @@ const Analyzer = (() => {
       max_length_mm: n ? +Math.max(...lens).toFixed(2) : 0,
       avg_diameter_mm: +avgDia.toFixed(2),
       sd_diameter_mm: +sd(dias, avgDia).toFixed(2),
+      avg_aspect: +(mean(pellets.map(p => p.diameter_mm > 0 ? p.length_mm / p.diameter_mm : 1))).toFixed(2),
       distribution,
       dia_distribution: diaDist,
       avg_color: avgColor,

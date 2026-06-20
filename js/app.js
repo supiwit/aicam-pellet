@@ -331,6 +331,7 @@
     applyRole();
     updateUserBadge();
     syncOfflineBadge();
+    Learn.render();
     updateCalibStatus();
     checkNet();
 
@@ -370,6 +371,7 @@
     populateShiftSelect();
     populateRefSelect();
     renderSpecEditor();
+    Learn.render();
     if (state.results) renderResults(false);
   }
 
@@ -593,10 +595,13 @@
             autoSplit: !!settings.autosplit,
           });
           const stats = Analyzer.computeStats(res.pellets, binsArray());
+          // ตรวจชนิดอาหารอัตโนมัติจากรูปทรงเม็ด:
+          //  เม็ดยาว/ทรงกระบอก (aspect ≥ 1.35) = กุ้ง (pellet mill) · เม็ดกลม/ป้อม (aspect < 1.35) = ปลา (extrusion)
+          settings.product = (stats.avg_aspect && stats.avg_aspect < 1.35) ? 'fish' : 'shrimp';
           const r = resolveSpec(res.pellets, stats);
           const specResult = Analyzer.checkSpec(res.pellets, r.spec);
           const yieldResult = computeYield(res.pellets, r.spec);
-          state.results = { ...res, stats, specResult, spec: r.spec, specAuto: r.auto, yield: yieldResult };
+          state.results = { ...res, stats, specResult, spec: r.spec, specAuto: r.auto, yield: yieldResult, productAuto: settings.product };
           state.lastSavedId = null;
           renderResults(true);
         } catch (err) {
@@ -703,8 +708,10 @@
     badge.textContent = sr.pass ? t('spec_pass') : t('spec_fail');
 
     const autoTag = state.results.specAuto ? ` · ${t('spec_auto')}` : '';
+    const prod = state.results.productAuto;
+    const prodTag = prod ? `🔎 ${productName(prod)} · ${t(prod === 'fish' ? 'shape_round' : 'shape_cyl')}\n` : '';
     $('spec-meta').textContent =
-      `${t('spec_die_dia', { d: spec.die })} · ${t('spec_range', { min: spec.min_mm, max: spec.max_mm })}${autoTag}`;
+      `${prodTag}${t('spec_die_dia', { d: spec.die })} · ${t('spec_range', { min: spec.min_mm, max: spec.max_mm })}${autoTag}`;
     $('spec-target').textContent = '🎯 ' + t('spec_target', { t: spec.target_pct });
     if (animate && sr.pass) fireConfetti();
 

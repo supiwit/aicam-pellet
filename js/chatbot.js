@@ -123,9 +123,87 @@ const ChatBot = (() => {
         en: ['pin', 'password', 'access code', 'lock', 'change code'],
       },
       ans: {
-        th: '🔐 เปลี่ยนรหัสเข้าใช้งานได้ที่แท็บ ⚙️ ตั้งค่า → ช่อง "รหัสเข้าใช้งาน" (ตัวเลข 4-8 หลัก) → กดบันทึกการตั้งค่า<br>รหัสเริ่มต้นคือ 1234 ควรเปลี่ยนทันทีเมื่อใช้งานจริง',
-        vi: '🔐 Đổi mã truy cập tại tab ⚙️ Cài đặt → ô "Mã truy cập" (4-8 số) → Lưu cài đặt<br>Mã mặc định là 1234, nên đổi ngay khi dùng thật',
-        en: '🔐 Change the access code in ⚙️ Settings → "Access code" field (4-8 digits) → Save settings<br>Default is 1234 — change it for production use',
+        th: '🔐 จัดการผู้ใช้/รหัสได้ที่แท็บ ⚙️ ตั้งค่า → "ผู้ใช้และสิทธิ์" (ชื่อ/รหัส 4-8 หลัก/บทบาท admin หรือ inspector) — admin เท่านั้นที่แก้ตั้งค่า/ลบรายงานได้<br>รหัสเริ่มต้น 1234 ควรเปลี่ยนเมื่อใช้จริง',
+        vi: '🔐 Quản lý người dùng/mã ở ⚙️ Cài đặt → "Người dùng & quyền" (admin/inspector). Mặc định 1234, nên đổi.',
+        en: '🔐 Manage users/PINs in ⚙️ Settings → "Users & roles" (admin/inspector). Default 1234 — change it.',
+      },
+    },
+    {
+      id: 'fines',
+      kw: {
+        th: ['ฝุ่น', 'fines', 'เม็ดแตก', 'ผง'],
+        vi: ['bột', 'fines', 'vụn'],
+        en: ['fines', 'dust', 'powder', 'broken'],
+      },
+      ans: {
+        th: '🌫️ <b>% ฝุ่น (Fines)</b> = เศษผง/เม็ดแตกที่เล็กกว่าตะแกรงล่าง คิดเป็น % โดยปริมาตร<br>ฝุ่นมาก = สูญเสียวัตถุดิบ สัตว์กินได้น้อย น้ำในบ่อเสีย<br>สาเหตุ: บดละเอียดเกิน, ไอน้ำ/ความชื้นไม่พอ, แม่พิมพ์สึก, ขนส่งกระแทก<br>อาหารกุ้งดี: ฝุ่น &lt; 1–2% · อ่านเพิ่มในแท็บ 📚 ความรู้',
+        vi: '🌫️ <b>% Bột (Fines)</b> = bột/vụn nhỏ hơn sàng dưới, % theo thể tích<br>Nhiều = hao phí, bẩn nước. Nguyên nhân: nghiền quá mịn, thiếu hơi/ẩm, khuôn mòn<br>Tốt: &lt; 1–2%',
+        en: '🌫️ <b>% Fines</b> = dust/broken bits below the lower sieve, % by volume<br>High fines = waste, poor intake, fouled water. Causes: over-grinding, low steam/moisture, worn die<br>Good: &lt; 1–2% · see the 📚 Learn tab',
+      },
+    },
+    {
+      id: 'pdi',
+      kw: {
+        th: ['pdi', 'ทนทาน', 'durability', 'ความแข็ง', 'holmen'],
+        vi: ['pdi', 'độ bền', 'durability', 'holmen'],
+        en: ['pdi', 'durability', 'hardness', 'holmen'],
+      },
+      ans: {
+        th: '💪 <b>PDI (Pellet Durability Index)</b> = % เม็ดที่เหลือดีหลังทดสอบกระแทก/หมุน (Holmen/tumbling)<br>วัดจริงต้องใช้เครื่องแล็บ — กรอกค่าจริงในช่อง "PDI" ตอนบันทึก เพื่อเก็บแนวโน้ม<br>แอปประเมินคร่าวจากคะแนนเนื้อสัมผัสให้ดูแนวทาง (ไม่ใช่ค่าแทน)<br>อาหารกุ้งดี PDI &gt; 95% (อยู่ในน้ำได้นานไม่ยุ่ย)',
+        vi: '💪 <b>PDI</b> = % viên còn nguyên sau thử va đập/quay<br>Đo thực cần máy lab — nhập giá trị thực khi lưu. App chỉ ước tính từ kết cấu<br>Tôm tốt: PDI &gt; 95%',
+        en: '💪 <b>PDI (Pellet Durability Index)</b> = % intact pellets after impact/tumbling<br>Needs a lab tester — enter the real value when saving. The app only estimates from texture<br>Good shrimp feed: PDI &gt; 95%',
+      },
+    },
+    {
+      id: 'yield',
+      kw: {
+        th: ['yield', 'ตะแกรง', 'mesh', 'ร่อน', 'oversize', 'undersize'],
+        vi: ['yield', 'sàng', 'mesh'],
+        en: ['yield', 'sieve', 'mesh', 'oversize', 'undersize'],
+      },
+      ans: {
+        th: '⚙️ <b>%Yield</b> จำลองร่อนด้วยตะแกรง mesh มาตรฐานตามเส้นผ่านศูนย์กลางเม็ด: ตัด undersize (ฝุ่น) + oversize (ใหญ่เกิน) ออก เหลือ on-size = Yield<br>คิดแบบถ่วงน้ำหนักปริมาตร (≈ มวล) เหมือนร่อนชั่งจริง<br>ตั้งค่า mesh แต่ละไซซ์ (มม. หรือเบอร์ mesh) ได้ในตั้งค่า',
+        vi: '⚙️ <b>%Yield</b> mô phỏng sàng mesh theo đường kính: loại undersize + oversize, còn on-size = Yield (theo thể tích). Đặt mesh từng cỡ trong Cài đặt',
+        en: '⚙️ <b>%Yield</b> simulates mesh sieving by diameter: removes undersize (fines) + oversize, leaving on-size = Yield (volume-weighted). Configure mesh per size in Settings',
+      },
+    },
+    {
+      id: 'product',
+      kw: {
+        th: ['กุ้ง', 'ปลา', 'ชนิด', 'extrusion', 'ทรงกระบอก', 'ทรงกลม', 'แยกชนิด'],
+        vi: ['tôm', 'cá', 'loại', 'extrusion', 'trụ', 'tròn'],
+        en: ['shrimp', 'fish', 'extrusion', 'cylindrical', 'round', 'type'],
+      },
+      ans: {
+        th: '🦐🐟 ระบบ<b>แยกชนิดอัตโนมัติ</b>จากรูปทรงเม็ด ไม่ต้องเลือกเอง:<br>• เม็ด<b>ทรงกระบอก</b> (ยาว/กว้าง ≥ 1.35) = <b>กุ้ง (Pellet Mill)</b><br>• เม็ด<b>ทรงกลม/ป้อม</b> (&lt; 1.35) = <b>ปลา (Extrusion)</b><br>แล้วเลือกตารางสเปกของชนิดนั้นให้เอง',
+        vi: '🦐🐟 Tự nhận loại theo hình dạng: trụ (≥1.35)=tôm (Pellet Mill); tròn (&lt;1.35)=cá (ép đùn). Tự chọn bảng tiêu chuẩn',
+        en: '🦐🐟 Auto-detects type by shape: cylindrical (≥1.35)=shrimp (Pellet Mill); round (&lt;1.35)=fish (extrusion). Picks the matching spec table',
+      },
+    },
+    {
+      id: 'storage',
+      kw: {
+        th: ['เก็บได้กี่', 'พื้นที่', 'กี่ภาพ', 'เต็ม', 'storage'],
+        vi: ['bao nhiêu ảnh', 'dung lượng', 'đầy'],
+        en: ['how many', 'storage', 'capacity', 'full', 'space'],
+      },
+      ans: {
+        th: '☁️ แพ็กฟรี Supabase: ไฟล์ 1 GB + ดาตาเบส 0.5 GB<br>รูปวิเคราะห์ ~150–300 KB/ภาพ → เก็บได้ราว <b>3,500–6,500 ภาพ</b> · ข้อมูลตัวเลขรองรับหมื่นๆ ล็อต<br>ใกล้เต็ม: ลบรายงานเก่า / ส่งออก CSV / อัปเกรด Pro',
+        vi: '☁️ Supabase free: 1 GB file + 0.5 GB DB → ~<b>3.500–6.500 ảnh</b>. Gần đầy: xóa cũ/xuất CSV/nâng Pro',
+        en: '☁️ Supabase free: 1 GB files + 0.5 GB DB → about <b>3,500–6,500 images</b>. Near full: delete old / export CSV / upgrade Pro',
+      },
+    },
+    {
+      id: 'accuracy',
+      kw: {
+        th: ['เงา', 'แสง', 'แม่นยำ', 'คลาดเคลื่อน', 'shadow'],
+        vi: ['bóng', 'ánh sáng', 'chính xác', 'shadow'],
+        en: ['shadow', 'glare', 'accuracy', 'lighting', 'precise'],
+      },
+      ans: {
+        th: '🌓 ระบบตัด<b>เงา/แสงนุ่ม</b>ขอบเม็ดออกก่อนวัด (ใช้ 2 ระดับเทรชโฮลด์) จึงวัดเฉพาะเนื้อเม็ดจริง ความยาว/Ø แม่นขึ้น<br>เพื่อผลดีที่สุด: ใช้พื้นเข้มด้าน + ไฟกระจายสม่ำเสมอ (เลี่ยงไฟทิศเดียวที่ทำให้เกิดเงายาว) + ถ่ายตั้งฉาก',
+        vi: '🌓 Hệ cắt bóng/ánh sáng mềm quanh viên trước khi đo (2 ngưỡng) → chính xác hơn. Dùng nền tối mờ + ánh sáng đều + chụp vuông góc',
+        en: '🌓 The app trims soft <b>shadow/glare</b> around pellets before measuring (two-level threshold) → more accurate. Use a matte dark background + even light + perpendicular shots',
       },
     },
   ];
