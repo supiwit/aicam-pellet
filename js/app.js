@@ -20,13 +20,22 @@
   };
 
   /* ---------------- settings ---------------- */
+  // sieve_under / sieve_over = ช่องตะแกรง mesh (มม.) สำหรับร่อน undersize/oversize · yield_target = % เป้าหมาย
   const DEFAULT_SPECS = [
-    { die: '1.0', min_mm: 1.0, max_mm: 2.0, target_pct: 60 },
-    { die: '1.2', min_mm: 1.5, max_mm: 2.5, target_pct: 60 },
-    { die: '1.4', min_mm: 2.0, max_mm: 3.0, target_pct: 60 },
-    { die: '1.8', min_mm: 2.0, max_mm: 3.0, target_pct: 60 },
-    { die: '2.0', min_mm: 3.0, max_mm: 4.0, target_pct: 60 },
+    { die: '1.0', min_mm: 1.0, max_mm: 2.0, target_pct: 60, sieve_under: 0.71, sieve_over: 1.40, yield_target: 90 },
+    { die: '1.2', min_mm: 1.5, max_mm: 2.5, target_pct: 60, sieve_under: 0.85, sieve_over: 1.70, yield_target: 90 },
+    { die: '1.4', min_mm: 2.0, max_mm: 3.0, target_pct: 60, sieve_under: 1.00, sieve_over: 2.00, yield_target: 90 },
+    { die: '1.8', min_mm: 2.0, max_mm: 3.0, target_pct: 60, sieve_under: 1.40, sieve_over: 2.50, yield_target: 90 },
+    { die: '2.0', min_mm: 3.0, max_mm: 4.0, target_pct: 60, sieve_under: 1.60, sieve_over: 2.80, yield_target: 90 },
   ];
+  // เติมค่าตะแกรง mesh เริ่มต้นให้สเปกเก่าที่ยังไม่มี (อิงเส้นผ่านศูนย์กลาง die)
+  function fillSieveDefaults(s) {
+    const d = parseFloat(s.die) || 1;
+    if (!(s.sieve_under > 0)) s.sieve_under = +(d * 0.72).toFixed(2);
+    if (!(s.sieve_over > 0)) s.sieve_over = +(d * 1.4).toFixed(2);
+    if (!(s.yield_target > 0)) s.yield_target = 90;
+    return s;
+  }
   // โรงงานอาหารกุ้ง 3 แห่ง (เวียดนาม) — เก็บข้อมูลแยกกัน
   const FACTORIES = [
     { id: 'ben-tre', th: 'เบ๊นแจ (Bến Tre)', vi: 'Bến Tre', en: 'Bến Tre' },
@@ -63,6 +72,7 @@
   const stored = JSON.parse(localStorage.getItem('aicam-settings') || '{}');
   const settings = { ...DEFAULTS, ...stored };
   if (!Array.isArray(settings.specs) || !settings.specs.length) settings.specs = DEFAULT_SPECS;
+  settings.specs.forEach(fillSieveDefaults); // เติมค่าตะแกรง mesh ให้สเปกเก่า
   // ย้ายหน่วยช่วงความยาวจาก ซม. เป็น มม. (ครั้งเดียว เฉพาะค่าเก่าที่บันทึกไว้เป็น ซม.)
   if (stored.bins && stored.binsUnit !== 'mm') {
     settings.bins = stored.bins.split(',')
@@ -117,6 +127,40 @@
     root.setProperty('--green-light', mix(color, 255, 0.86)); // อ่อนลง
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.content = color;
+  }
+
+  /* ---------------- % Yield (ตะแกรงร่อน mesh) ----------------
+   * จำลองการร่อนด้วยตะแกรง mesh มาตรฐาน โดยจัดเม็ดตามเส้นผ่านศูนย์กลาง (Min Feret):
+   *  - undersize : Ø < ช่องตะแกรงล่าง (ผง/เม็ดแตก ร่อนหลุด)
+   *  - oversize  : Ø > ช่องตะแกรงบน (เม็ดใหญ่/เกาะกัน ค้างบนตะแกรง)
+   *  - on-size   : อยู่ระหว่างกลาง = ผลผลิตที่ใช้ได้
+   * Yield คิดแบบถ่วงน้ำหนักปริมาตร (∝ มวล) = สูตรเดียวกับร่อนชั่งน้ำหนักจริง
+   */
+  function computeYield(pellets, spec) {
+    if (!pellets || !pellets.length || !spec) return null;
+    const su = +spec.sieve_under, so = +spec.sieve_over;
+    if (!(su > 0) || !(so > su)) return null;
+    let cu = 0, con = 0, co = 0, vu = 0, von = 0, vo = 0, vtot = 0;
+    for (const p of pellets) {
+      const d = p.diameter_mm;
+      const vol = Math.PI / 4 * d * d * Math.max(d, p.length_mm); // ปริมาตรทรงกระบอกโดยประมาณ
+      vtot += vol;
+      if (d < su) { cu++; vu += vol; }
+      else if (d > so) { co++; vo += vol; }
+      else { con++; von += vol; }
+    }
+    const n = pellets.length;
+    const c = x => +(x * 100 / n).toFixed(1);
+    const v = x => vtot ? +(x * 100 / vtot).toFixed(1) : 0;
+    const target = +spec.yield_target || 90;
+    const yieldVol = v(von);
+    return {
+      sieve_under: su, sieve_over: so, target,
+      under_pct: c(cu), onsize_pct: c(con), over_pct: c(co),
+      under_vol: v(vu), yield: yieldVol, over_vol: v(vo),
+      yield_count: c(con),
+      pass: yieldVol >= target,
+    };
   }
 
   /* ---------------- toast ---------------- */
@@ -363,7 +407,9 @@
         state.results.spec = r.spec;
         state.results.specAuto = r.auto;
         state.results.specResult = Analyzer.checkSpec(state.results.pellets, r.spec);
+        state.results.yield = computeYield(state.results.pellets, r.spec);
         renderSpecPanel(false);
+        renderYieldPanel(false);
       }
     };
   }
@@ -388,7 +434,8 @@
           const stats = Analyzer.computeStats(res.pellets, binsArray());
           const r = resolveSpec(res.pellets, stats);
           const specResult = Analyzer.checkSpec(res.pellets, r.spec);
-          state.results = { ...res, stats, specResult, spec: r.spec, specAuto: r.auto };
+          const yieldResult = computeYield(res.pellets, r.spec);
+          state.results = { ...res, stats, specResult, spec: r.spec, specAuto: r.auto, yield: yieldResult };
           state.lastSavedId = null;
           renderResults(true);
         } catch (err) {
@@ -443,6 +490,7 @@
     else rj.hidden = true;
 
     renderSpecPanel(animate);
+    renderYieldPanel(animate);
     renderCharts('chart-bar', 'chart-donut', stats, state.charts);
     renderDiaChart('chart-dia', stats, state.charts);
     renderDistTable($('tbl-dist').querySelector('tbody'), stats.distribution);
@@ -499,6 +547,39 @@
       requestAnimationFrame(() => { seg.style.width = pct + '%'; });
       $(lgId).textContent = pct + '%';
     }
+  }
+
+  /* ---------------- yield panel (ตะแกรงร่อน) ---------------- */
+  function renderYieldPanel(animate) {
+    const panel = $('yield-panel');
+    const y = state.results ? state.results.yield : null;
+    if (!y) { panel.hidden = true; return; }
+    panel.hidden = false;
+
+    if (animate) animateNum($('yield-value'), y.yield, 1);
+    else $('yield-value').textContent = y.yield.toFixed(1);
+    $('yield-ring').style.setProperty('--p', y.yield);
+    $('yield-ring').className = 'yield-ring ' + (y.pass ? 'pass' : 'fail');
+
+    const badge = $('yield-badge');
+    badge.className = 'spec-badge ' + (y.pass ? 'pass' : 'fail');
+    badge.textContent = y.pass ? t('spec_pass') : t('spec_fail');
+
+    $('yield-meta').textContent =
+      `${t('yield_mesh', { u: y.sieve_under, o: y.sieve_over })} · 🎯 ${t('yield_target', { t: y.target })}`;
+
+    const segs = [
+      ['yseg-under', 'ylg-under', y.under_vol],
+      ['yseg-on', 'ylg-on', y.yield],
+      ['yseg-over', 'ylg-over', y.over_vol],
+    ];
+    for (const [segId, lgId, pct] of segs) {
+      const seg = $(segId);
+      seg.querySelector('span').textContent = pct >= 8 ? pct + '%' : '';
+      requestAnimationFrame(() => { seg.style.width = pct + '%'; });
+      $(lgId).textContent = pct + '%';
+    }
+    if (animate && y.pass) fireConfetti();
   }
 
   /* ---------------- charts ---------------- */
@@ -744,6 +825,7 @@
           insize_pct: sr ? sr.insize_pct : null,
           over_pct: sr ? sr.over_pct : null,
           spec_pass: sr ? sr.pass : null,
+          yield: state.results.yield || null,
         }, blob);
         state.lastSavedId = saved.id;
         st.className = 'save-status ok';
@@ -806,6 +888,14 @@
         [t('csv_die'), s.die_size],
         [t('csv_under'), s.under_pct], [t('csv_insize'), s.insize_pct], [t('csv_over'), s.over_pct],
         [t('csv_result'), s.spec_pass ? t('csv_pass') : t('csv_fail')]);
+    }
+    if (s.yield) {
+      const y = s.yield;
+      rows.push([],
+        [t('yield_title'), ''],
+        [t('yield_mesh_csv'), `${y.sieve_under} - ${y.sieve_over} mm`],
+        [t('yield_under'), y.under_vol + '%'], [t('yield_onsize'), y.yield + '%'], [t('yield_over'), y.over_vol + '%'],
+        [t('csv_result'), y.pass ? t('csv_pass') : t('csv_fail')]);
     }
     if (s.avg_color && s.avg_color.lab) {
       const lab = s.avg_color.lab;
@@ -1013,6 +1103,30 @@
             <div><i class="lg over"></i>${t('spec_over')} <b>${s.over_pct}%</b></div>
           </div>
         </div>`;
+      const y = s.yield;
+      const yieldHtml = !y ? '' : `
+        <div class="yield-panel">
+          <div class="spec-head">
+            <h3>${t('yield_title')}</h3>
+            <span class="spec-badge ${y.pass ? 'pass' : 'fail'}">${y.pass ? t('spec_pass') : t('spec_fail')}</span>
+          </div>
+          <div class="yield-row">
+            <div class="yield-ring ${y.pass ? 'pass' : 'fail'}" style="--p:${y.yield}"><div class="yield-value">${y.yield}</div><div class="yield-unit">% Yield</div></div>
+            <div class="yield-side">
+              <div class="spec-meta">${t('yield_mesh', { u: y.sieve_under, o: y.sieve_over })} · 🎯 ${t('yield_target', { t: y.target })}</div>
+              <div class="spec-bar">
+                <div class="spec-seg under" style="width:${y.under_vol}%"><span>${y.under_vol >= 8 ? y.under_vol + '%' : ''}</span></div>
+                <div class="spec-seg insize" style="width:${y.yield}%"><span>${y.yield >= 8 ? y.yield + '%' : ''}</span></div>
+                <div class="spec-seg over" style="width:${y.over_vol}%"><span>${y.over_vol >= 8 ? y.over_vol + '%' : ''}</span></div>
+              </div>
+              <div class="spec-legend">
+                <div><i class="lg under"></i>${t('yield_under')} <b>${y.under_vol}%</b></div>
+                <div><i class="lg insize"></i>${t('yield_onsize')} <b>${y.yield}%</b></div>
+                <div><i class="lg over"></i>${t('yield_over')} <b>${y.over_vol}%</b></div>
+              </div>
+            </div>
+          </div>
+        </div>`;
       content.innerHTML = `
         <h2>${s.sample_name || t('rep_noname')}</h2>
         <p class="hint">${d}${s.operator ? ` · ${t('rep_inspector')}: ${s.operator}` : ''}${s.notes ? `<br>${t('rep_note')}: ${s.notes}` : ''}</p>
@@ -1026,6 +1140,7 @@
           <div class="stat"><div class="stat-num">${(+s.max_length_mm).toFixed(1)}</div><div class="stat-label">${t('st_max')}</div></div>
         </div>
         ${specHtml}
+        ${yieldHtml}
         <div class="chart-box"><canvas id="m-chart-bar"></canvas></div>
         <div class="chart-box donut"><canvas id="m-chart-donut"></canvas></div>
         <h3>${t('dist_title')}</h3>
@@ -1094,6 +1209,9 @@
         <td><input data-spec="${i}" data-f="min_mm" type="number" step="0.1" value="${s.min_mm}"></td>
         <td><input data-spec="${i}" data-f="max_mm" type="number" step="0.1" value="${s.max_mm}"></td>
         <td><input data-spec="${i}" data-f="target_pct" type="number" step="5" value="${s.target_pct}"></td>
+        <td><input data-spec="${i}" data-f="sieve_under" type="number" step="0.05" value="${s.sieve_under}"></td>
+        <td><input data-spec="${i}" data-f="sieve_over" type="number" step="0.05" value="${s.sieve_over}"></td>
+        <td><input data-spec="${i}" data-f="yield_target" type="number" step="5" value="${s.yield_target}"></td>
         <td><button class="spec-del" data-del="${i}">🗑</button></td>
       </tr>`).join('');
     tbody.querySelectorAll('input').forEach(inp => {
@@ -1145,7 +1263,7 @@
 
   function initSettings() {
     $('btn-add-spec').addEventListener('click', () => {
-      settings.specs.push({ die: '', min_mm: 0, max_mm: 0, target_pct: 60 });
+      settings.specs.push({ die: '', min_mm: 0, max_mm: 0, target_pct: 60, sieve_under: 0, sieve_over: 0, yield_target: 90 });
       renderSpecEditor();
     });
     $('s-theme').addEventListener('input', e => {
@@ -1168,11 +1286,15 @@
       settings.theme = $('s-theme').value || DEFAULTS.theme;
       const pin = $('s-pin').value.trim();
       if (/^\d{4,8}$/.test(pin)) settings.pin = pin;
-      settings.specs = settings.specs.filter(s => s.die !== '' && s.max_mm > 0);
+      settings.specs = settings.specs.filter(s => s.die !== '' && s.max_mm > 0).map(fillSieveDefaults);
       saveSettings();
       updateCalibStatus();
       populateDieSelect();
       renderSpecEditor();
+      // คำนวณ yield ใหม่ถ้ามีผลค้างอยู่
+      if (state.results && state.results.spec) {
+        state.results.yield = computeYield(state.results.pellets, currentSpec() || state.results.spec);
+      }
       $('settings-status').textContent = t('s_saved');
       setTimeout(() => { $('settings-status').textContent = ''; }, 2500);
     });
