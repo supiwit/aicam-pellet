@@ -17,6 +17,7 @@
 <div id="lock-screen" class="lock-screen">
   <div class="lock-card">
     <div class="lock-logo">
+      <img id="lock-logo-img" class="lock-logo-img" hidden alt="logo">
       <svg class="lock-machine" viewBox="0 0 160 120" width="180" height="135" aria-hidden="true">
         <defs>
           <linearGradient id="lkBody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fffdf7"/><stop offset="1" stop-color="#cdbb90"/></linearGradient>
@@ -67,6 +68,7 @@
 
 <header class="topbar">
   <div class="logo">
+    <img id="header-logo-img" class="header-logo-img" hidden alt="logo">
     <svg class="logo-machine" viewBox="0 0 64 64" width="30" height="30" aria-hidden="true">
       <rect x="14" y="10" width="30" height="9" rx="4.5" fill="#facc15" stroke="#b98900"/>
       <circle cx="15" cy="14.5" r="6" fill="#2f7fd1" stroke="#15497c"/>
@@ -170,7 +172,6 @@
       <div class="stat"><div class="stat-num" id="st-max">–</div><div class="stat-label" data-i18n="st_max"></div></div>
       <div class="stat"><div class="stat-num" id="st-area">–</div><div class="stat-label" data-i18n="st_area"></div></div>
       <div class="stat"><div class="stat-num" id="st-cv">–</div><div class="stat-label" data-i18n="st_cv"></div></div>
-      <div class="stat" id="st-fines-box"><div class="stat-num" id="st-fines">–</div><div class="stat-label" data-i18n="st_fines"></div></div>
     </div>
 
     <div id="split-note" class="info-note" hidden></div>
@@ -281,7 +282,7 @@
     <!-- ความหนาแน่นอาหาร (Density) -->
     <h3 data-i18n="density_title">⚖️ ความหนาแน่นอาหาร</h3>
     <div class="form-grid">
-      <label><span data-i18n="f_weight"></span> <input type="number" id="f-weight" step="0.1" min="0" data-i18n-ph="f_weight_ph"></label>
+      <label><span data-i18n="f_weight"></span> <input type="number" id="f-weight" step="0.1" min="0" value="10" data-i18n-ph="f_weight_ph"></label>
       <label><span data-i18n="f_volume"></span> <input type="number" id="f-volume" step="1" min="0" data-i18n-ph="f_volume_ph"></label>
     </div>
     <div id="density-out" class="density-out hint"></div>
@@ -290,10 +291,8 @@
     <div class="form-grid">
       <label><span data-i18n="f_sample"></span> <input type="text" id="f-sample" data-i18n-ph="f_sample_ph"></label>
       <label><span data-i18n="f_operator"></span> <input type="text" id="f-operator" data-i18n-ph="f_operator_ph"></label>
-      <label><span data-i18n="f_pdi"></span> <input type="number" id="f-pdi" step="0.1" min="0" max="100" data-i18n-ph="f_pdi_ph"></label>
       <label class="full"><span data-i18n="f_notes"></span> <input type="text" id="f-notes" data-i18n-ph="f_notes_ph"></label>
     </div>
-    <p class="hint" id="pdi-hint"></p>
     <div class="btn-row">
       <button class="btn primary big" id="btn-save" data-i18n="save_btn">💾 บันทึกขึ้นออนไลน์</button>
       <button class="btn" id="btn-share" data-i18n="share_btn">🔗 แชร์</button>
@@ -386,11 +385,27 @@
       <label><span data-i18n="s_demax"></span>
         <input type="number" id="s-demax" step="1" min="1" value="10">
       </label>
+      <label><span data-i18n="s_refcolor_fish"></span>
+        <input type="color" id="s-refcolor-fish" value="#8a6a3a">
+      </label>
+      <label><span data-i18n="s_demax_fish"></span>
+        <input type="number" id="s-demax-fish" step="1" min="1" value="12">
+      </label>
       <label class="full"><span data-i18n="s_webhook"></span>
         <input type="text" id="s-webhook" data-i18n-ph="s_webhook_ph">
       </label>
     </div>
     <div id="storage-meter" class="storage-meter"></div>
+
+    <h3 data-i18n="s_logo_title">🖼 โลโก้องค์กร</h3>
+    <p class="hint" data-i18n="s_logo_hint"></p>
+    <div class="logo-upload-row">
+      <img id="logo-preview" class="logo-preview" hidden>
+      <label class="btn small"><span data-i18n="s_logo_pick">เลือกไฟล์โลโก้</span>
+        <input type="file" id="s-logo-file" accept="image/*" hidden>
+      </label>
+      <button class="btn small" id="btn-logo-clear" data-i18n="s_logo_clear">ลบโลโก้</button>
+    </div>
 
     <h3 data-i18n="s_users_title">👤 ผู้ใช้และสิทธิ์</h3>
     <p class="hint" data-i18n="s_users_hint"></p>

@@ -96,19 +96,22 @@
     for (const row of MESH_TABLE) { const d = Math.abs(row[1] - v); if (d < bd) { bd = d; best = row; } }
     return best[0];
   }
-  // โรงงานอาหารกุ้ง 3 แห่ง (เวียดนาม) — เก็บข้อมูลแยกกัน
+  // โรงงานอาหารกุ้ง 4 แห่ง (เวียดนาม) — เก็บข้อมูลแยกกัน + สี/ไอคอนประจำโรงงาน
   const FACTORIES = [
-    { id: 'ben-tre', th: 'เบ๊นแจ (Bến Tre)', vi: 'Bến Tre', en: 'Bến Tre' },
-    { id: 'ca-mau',  th: 'ก่าเมา (Cà Mau)',  vi: 'Cà Mau',  en: 'Cà Mau' },
-    { id: 'bau-xeo', th: 'บ่าวแซว (Bàu Xéo)', vi: 'Bàu Xéo', en: 'Bàu Xéo' },
-    { id: 'can-tho', th: 'เกิ่นเทอ (Cần Thơ)', vi: 'Cần Thơ', en: 'Cần Thơ' },
+    { id: 'ben-tre', th: 'เบ๊นแจ (Bến Tre)', vi: 'Bến Tre', en: 'Bến Tre', color: '#1b6e5a', icon: '🟢' },
+    { id: 'ca-mau',  th: 'ก่าเมา (Cà Mau)',  vi: 'Cà Mau',  en: 'Cà Mau', color: '#2563eb', icon: '🔵' },
+    { id: 'bau-xeo', th: 'บ่าวแซว (Bàu Xéo)', vi: 'Bàu Xéo', en: 'Bàu Xéo', color: '#d97706', icon: '🟠' },
+    { id: 'can-tho', th: 'เกิ่นเทอ (Cần Thơ)', vi: 'Cần Thơ', en: 'Cần Thơ', color: '#9333ea', icon: '🟣' },
   ];
   const factoryName = id => {
     const f = FACTORIES.find(x => x.id === id);
     return f ? (f[I18N.lang] || f.en) : id;
   };
+  const factoryColor = id => { const f = FACTORIES.find(x => x.id === id); return f ? f.color : '#94a3b8'; };
+  const factoryIcon = id => { const f = FACTORIES.find(x => x.id === id); return f ? f.icon : '🏭'; };
 
-  // ตำแหน่ง/จุดเก็บตัวอย่าง (stage)
+  // ตำแหน่ง/จุดเก็บตัวอย่าง (stage) + ไอคอน
+  const STAGE_ICON = { machine: '⚙️', screen: '🧺', packing: '📦' };
   const STAGES = [
     { id: '', th: '— ไม่ระบุจุด —', vi: '— Không chọn —', en: '— No stage —' },
     { id: 'machine', th: 'หน้าเครื่อง', vi: 'Tại máy', en: 'At machine' },
@@ -116,6 +119,7 @@
     { id: 'packing', th: 'แพ็คกิ้ง', vi: 'Đóng gói', en: 'Packing' },
   ];
   const stageName = id => { const s = STAGES.find(x => x.id === id); return s ? (s[I18N.lang] || s.en) : (id || ''); };
+  const stageLabel = id => (id && STAGE_ICON[id] ? STAGE_ICON[id] + ' ' : '') + stageName(id);
 
   // ธีมสีหลัก (accent) — ค่าเริ่มต้นและพรีเซ็ต
   const THEMES = ['#1b6e5a', '#e3000f', '#0ea5e9', '#7c3aed', '#d97706', '#0f766e', '#be123c', '#1e3a8a'];
@@ -129,9 +133,11 @@
     maxlen: 50,
     maxaspect: 8,
     autosplit: true,
-    refcolor: '#c8a464',
+    refcolor: '#c8a464',        // สีมาตรฐานอาหารกุ้ง
+    refcolorFish: '#8a6a3a',    // สีมาตรฐานอาหารปลา (ตั้งแยก)
     userefcolor: false,
-    demax: 10,
+    demax: 10,                  // เกณฑ์สีกุ้ง
+    demaxFish: 12,              // เกณฑ์สีปลา
     pin: '1234',
     die: 'auto',
     factory: 'ben-tre',
@@ -139,13 +145,21 @@
     shift: '',
     stage: '',
     refObject: 'coin1',
-    colorGain: null,     // ปรับเทียบสี white/grey card {r,g,b}
-    webhook: '',         // URL แจ้งเตือน SPC (Discord/Slack/อื่นๆ)
+    sampleWeight: 10,           // น้ำหนักชั่งเริ่มต้น (g) สำหรับ density
+    colorGain: null,            // ปรับเทียบสี white/grey card {r,g,b}
+    webhook: '',                // URL แจ้งเตือน SPC (Discord/Slack/อื่นๆ)
+    logo: null,                 // โลโก้ที่อัปโหลด (data URL)
     theme: '#1b6e5a',
     reportFactory: '',
     sieveUnit: 'mm',   // 'mm' หรือ 'mesh'
     reportStage: '',
-    users: [{ name: 'Admin', pin: '1234', role: 'admin' }],  // ข้อ 7: ผู้ใช้ + สิทธิ์
+    users: [
+      { name: 'Admin', pin: '1234', role: 'admin', factory: '' },
+      { name: 'Bến Tre', pin: '1001', role: 'inspector', factory: 'ben-tre' },
+      { name: 'Cà Mau', pin: '1002', role: 'inspector', factory: 'ca-mau' },
+      { name: 'Bàu Xéo', pin: '1003', role: 'inspector', factory: 'bau-xeo' },
+      { name: 'Cần Thơ', pin: '1004', role: 'inspector', factory: 'can-tho' },
+    ],
     specs: DEFAULT_SPECS,
   };
   const stored = JSON.parse(localStorage.getItem('aicam-settings') || '{}');
@@ -172,7 +186,7 @@
 
   // คีย์ที่ใช้ร่วมทุกเครื่อง (เก็บออนไลน์) — มาตรฐาน QC องค์กร
   // (mmpp/colorGain = เฉพาะกล้องของเครื่องนั้น · theme/lang = ความชอบส่วนตัว → ไม่ sync)
-  const SHARED_KEYS = ['specs', 'users', 'demax', 'bins', 'binsUnit', 'maxaspect', 'minlen', 'maxlen', 'refcolor', 'webhook', 'sieveUnit', 'polarity'];
+  const SHARED_KEYS = ['specs', 'users', 'demax', 'demaxFish', 'bins', 'binsUnit', 'maxaspect', 'minlen', 'maxlen', 'refcolor', 'refcolorFish', 'userefcolor', 'webhook', 'sieveUnit', 'polarity', 'logo'];
   async function loadSharedConfig() {
     try {
       const cfg = await DB.getConfig();
@@ -289,6 +303,8 @@
   function setCurrentUser(u) {
     state.currentUser = u;
     sessionStorage.setItem('aicam-user', JSON.stringify(u));
+    // ผู้ใช้ที่ผูกกับโรงงาน → ตั้งโรงงานให้อัตโนมัติ
+    if (u && u.factory) { settings.factory = u.factory; saveSettings(); }
   }
   function isAdmin() { return state.currentUser && state.currentUser.role === 'admin'; }
   function isUnlocked() {
@@ -411,12 +427,14 @@
     checkNet();
 
     // ดึงตั้งค่ามาตรฐานองค์กรจากออนไลน์ ให้ทุกเครื่องตรงกัน
+    applyLogo();
     loadSharedConfig().then(ok => {
       if (ok) {
         syncSettingsForm();
         populateDieSelect();
         renderLockUsers();
         applyRole();
+        applyLogo();
       }
     });
 
@@ -503,7 +521,7 @@
   function populateStageSelect() {
     const sel = $('stage-select');
     if (!sel) return;
-    sel.innerHTML = STAGES.map(s => `<option value="${s.id}">${stageName(s.id)}</option>`).join('');
+    sel.innerHTML = STAGES.map(s => `<option value="${s.id}">${s.id ? stageLabel(s.id) : stageName(s.id)}</option>`).join('');
     sel.value = settings.stage || '';
     sel.onchange = () => { settings.stage = sel.value; saveSettings(); };
   }
@@ -801,10 +819,6 @@
     set('st-max', stats.max_length_mm, 1);
     set('st-area', stats.avg_area_mm2 || 0, 2);
     set('st-cv', stats.cv_pct || 0, 1);
-    // ข้อ 3: % ฝุ่น (undersize จากการร่อน) — แสดงเมื่อมี yield
-    const finesBox = $('st-fines-box'), y0 = state.results.yield;
-    if (y0) { finesBox.hidden = false; set('st-fines', y0.under_vol || 0, 1); }
-    else finesBox.hidden = true;
 
     const sp = $('split-note');
     sp.hidden = false;
@@ -825,11 +839,7 @@
     // เติมชื่อผู้ตรวจอัตโนมัติจากผู้ใช้ที่ล็อกอิน
     const defOp = (state.currentUser && state.currentUser.name) || settings.operator;
     if (defOp && !$('f-operator').value) $('f-operator').value = defOp;
-    // ข้อ 2: คำแนะนำ PDI จากคะแนนเนื้อสัมผัส (ประมาณ)
-    if (stats.texture) {
-      const est = Math.round(88 + (stats.texture.score - 70) * 0.12);
-      $('pdi-hint').textContent = '💡 ' + t('pdi_est', { v: Math.max(80, Math.min(99, est)) });
-    } else $('pdi-hint').textContent = '';
+    renderDensity();
     $('card-results').hidden = false;
     if (animate) $('card-results').scrollIntoView({ behavior: 'smooth' });
   }
@@ -1037,7 +1047,7 @@
   }
 
   /* แถบสเกลสี ΔE00 = 0, 10, 20 จากสีตัวอย่าง */
-  function renderColorRange(baseLab, sampleDe) {
+  function renderColorRange(baseLab, sampleDe, demaxP) {
     const box = $('color-range');
     if (!box || !baseLab) { if (box) box.hidden = true; return; }
     const targets = [0, 5, 10, 15, 20];
@@ -1051,7 +1061,7 @@
     let marker = '';
     if (sampleDe != null) {
       const pos = Math.max(0, Math.min(100, sampleDe / 20 * 100));
-      const cls = sampleDe <= +settings.demax ? 'ok' : 'bad';
+      const cls = sampleDe <= (demaxP || +settings.demax) ? 'ok' : 'bad';
       marker = `<div class="cr-marker-wrap"><div class="cr-marker ${cls}" style="left:${pos}%">▼ ${sampleDe.toFixed(1)}</div></div>`;
     }
     box.innerHTML = `<div class="cr-title">${t('color_range_title')}</div>` +
@@ -1085,10 +1095,12 @@
         <div class="lab-val"><b>${(+lab.b).toFixed(1)}</b><span>b* (−B / +Y)</span></div>
       </div>`;
 
-    // อาหารปลา (extrusion) ไม่เทียบสีมาตรฐานแยก — แสดงค่าสีเฉยๆ
+    // สีมาตรฐานแยกตามชนิดอาหาร (กุ้ง/ปลา ตั้งค่าแยกกัน)
     const isFish = state.results && state.results.productAuto === 'fish';
-    if (settings.userefcolor && !isFish) {
-      const ref = hexToRgb(settings.refcolor);
+    const refHex = isFish ? (settings.refcolorFish || settings.refcolor) : settings.refcolor;
+    const demaxP = isFish ? (+settings.demaxFish || +settings.demax) : +settings.demax;
+    if (settings.userefcolor) {
+      const ref = hexToRgb(refHex);
       const refLab = Analyzer.rgb2lab(ref.r, ref.g, ref.b);
       const de76 = Analyzer.deltaE(lab, refLab);
       const de00 = Analyzer.deltaE2000(lab, refLab);
@@ -1096,10 +1108,10 @@
       ac.delta_e00 = +de00.toFixed(2);
       ac.ref_lab = { l: +refLab.l.toFixed(2), a: +refLab.a.toFixed(2), b: +refLab.b.toFixed(2) };
       refBox.hidden = false;
-      $('swatch-ref').style.background = settings.refcolor;
-      $('color-de').textContent = `ΔE00 = ${de00.toFixed(1)}`;
+      $('swatch-ref').style.background = refHex;
+      $('color-de').textContent = `ΔE00 = ${de00.toFixed(1)} (${productName(isFish ? 'fish' : 'shrimp')})`;
       verdict.hidden = false;
-      const pass = de00 <= +settings.demax;
+      const pass = de00 <= demaxP;
       verdict.className = 'verdict ' + (pass ? 'pass' : 'fail');
       verdict.textContent = pass ? t('color_pass') : t('color_fail');
 
@@ -1120,7 +1132,7 @@
     }
     $('lab-panel').innerHTML = labHtml;
     $('lab-panel').hidden = false;
-    renderColorRange(lab, (settings.userefcolor && !isFish) ? ac.delta_e00 : null);
+    renderColorRange(lab, settings.userefcolor ? ac.delta_e00 : null, demaxP);
   }
 
   /* ---------------- คุณภาพหน้าตัดเม็ด ---------------- */
@@ -1258,8 +1270,6 @@
           product: settings.product || null,
           shift: settings.shift || null,
           stage: settings.stage || null,
-          fines_pct: state.results.yield ? state.results.yield.under_vol : null,
-          pdi: parseFloat($('f-pdi').value) || null,
           density: (() => { const d = computeDensity(); return (d.bulk_gL || d.particle_gcm3) ? d : null; })(),
           sample_name: $('f-sample').value || null,
           operator: $('f-operator').value || null,
@@ -1378,8 +1388,7 @@
           ${row(t('st_cv'), (s.cv_pct || 0).toFixed(1) + '%')}
           ${sp && sr ? row('Die ' + sp.die + ' · Insize', sr.insize_pct + '% <span class="badge ' + (sr.pass ? 'pass' : 'fail') + '">' + (sr.pass ? t('csv_pass') : t('csv_fail')) + '</span>') : ''}
           ${y ? row('%Yield (' + yieldMeshLabel(y) + ')', y.yield + '% <span class="badge ' + (y.pass ? 'pass' : 'fail') + '">' + (y.pass ? t('csv_pass') : t('csv_fail')) + '</span>') : ''}
-          ${y ? row(t('st_fines'), y.under_vol + '%') : ''}
-          ${$('f-pdi').value ? row('PDI', $('f-pdi').value) : ''}
+          ${(() => { const d = computeDensity(); return d.bulk_gL ? row(t('density_bulk'), d.bulk_gL + ' g/L') : ''; })()}
           ${ac && ac.lab ? row('CIELAB', 'L*' + (+ac.lab.l).toFixed(1) + ' a*' + (+ac.lab.a).toFixed(1) + ' b*' + (+ac.lab.b).toFixed(1) + (ac.delta_e00 != null ? ' · ΔE00 ' + ac.delta_e00 : '')) : ''}
           ${s.texture ? row(t('tex_title'), s.texture.score + '/100 (' + s.texture.grade + ')') : ''}
         </table>
@@ -1563,11 +1572,12 @@
   function renderFactoryFilter() {
     const box = $('factory-filter');
     if (!box) return;
-    const chips = [{ id: '', label: t('factory_all') }]
-      .concat(FACTORIES.map(f => ({ id: f.id, label: factoryName(f.id) })));
-    box.innerHTML = chips.map(c =>
-      `<button class="fchip ${(settings.reportFactory || '') === c.id ? 'active' : ''}" data-fid="${c.id}">${c.label}</button>`
-    ).join('');
+    const chips = [{ id: '', label: t('factory_all'), color: '#64748b' }]
+      .concat(FACTORIES.map(f => ({ id: f.id, label: factoryIcon(f.id) + ' ' + factoryName(f.id), color: f.color })));
+    box.innerHTML = chips.map(c => {
+      const active = (settings.reportFactory || '') === c.id;
+      return `<button class="fchip ${active ? 'active' : ''}" data-fid="${c.id}" style="${active ? `background:${c.color};border-color:${c.color}` : `border-color:${c.color};color:${c.color}`}">${c.label}</button>`;
+    }).join('');
     box.querySelectorAll('.fchip').forEach(b => b.addEventListener('click', () => {
       settings.reportFactory = b.dataset.fid;
       saveSettings();
@@ -1580,7 +1590,7 @@
     const box = $('stage-filter');
     if (!box) return;
     const chips = [{ id: '', label: t('stage_all') }]
-      .concat(STAGES.filter(s => s.id).map(s => ({ id: s.id, label: stageName(s.id) })));
+      .concat(STAGES.filter(s => s.id).map(s => ({ id: s.id, label: stageLabel(s.id) })));
     box.innerHTML = chips.map(c =>
       `<button class="fchip ${(settings.reportStage || '') === c.id ? 'active' : ''}" data-sid="${c.id}">${c.label}</button>`
     ).join('');
@@ -1653,6 +1663,7 @@
         const div = document.createElement('div');
         div.className = 'report-item';
         div.style.animationDelay = Math.min(idx * 0.04, 0.4) + 's';
+        if (r.factory) div.style.borderLeft = `5px solid ${factoryColor(r.factory)}`;  // แถบสีประจำโรงงาน
         const d = new Date(r.created_at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
         const passChip = r.spec_pass == null ? '' :
           `<span class="report-pass ${r.spec_pass ? 'pass' : 'fail'}">${r.spec_pass ? '✓' : '✗'} ${r.insize_pct ?? ''}%</span>`;
@@ -1660,7 +1671,7 @@
           ${r.image_url ? `<img class="report-thumb" src="${r.image_url}" loading="lazy">` : '<div class="report-thumb"></div>'}
           <div class="report-info">
             <div class="report-title">${r.sample_name || t('rep_noname')}${r.die_size ? ` · Die ${r.die_size}` : ''}</div>
-            <div class="report-sub">${d}${r.factory ? ' · 🏭 ' + factoryName(r.factory) : ''}${r.stage ? ' · 📍 ' + stageName(r.stage) : ''}${r.operator ? ' · ' + r.operator : ''}</div>
+            <div class="report-sub">${d}${r.factory ? ' · ' + factoryIcon(r.factory) + ' ' + factoryName(r.factory) : ''}${r.stage ? ' · ' + stageLabel(r.stage) : ''}${r.operator ? ' · ' + r.operator : ''}</div>
             <div class="report-stats">${r.pellet_count} ${t('rep_items')} · ${t('rep_avg')} ${(+r.avg_length_mm).toFixed(1)} mm · Ø ${(+r.avg_diameter_mm).toFixed(2)} mm</div>
           </div>
           ${passChip}`;
@@ -1860,9 +1871,29 @@
     });
     tbody.querySelectorAll('.spec-del').forEach(btn => {
       btn.addEventListener('click', () => {
+        readSpecEditor();   // กันค่าที่ยังไม่ commit หายตอนลบแถว
         settings.specs.splice(+btn.dataset.del, 1);
         renderSpecEditor();
       });
+    });
+  }
+
+  // อ่านค่าจากตารางสเปกตรงๆ (กันค่าหายตอนยังไม่ blur/change บนมือถือ) — แก้บั๊ก "บันทึกแล้วไม่เก็บ"
+  function readSpecEditor() {
+    const mesh = settings.sieveUnit === 'mesh';
+    document.querySelectorAll('#tbl-specs tbody input,#tbl-specs tbody select').forEach(inp => {
+      const i = +inp.dataset.spec, f = inp.dataset.f;
+      if (!settings.specs[i]) return;
+      if (f === 'die' || f === 'product') { settings.specs[i][f] = inp.value; return; }
+      let val = parseFloat(inp.value) || 0;
+      if (inp.dataset.sieve && mesh) val = meshToMm(val);
+      settings.specs[i][f] = val;
+    });
+  }
+  function readUsersEditor() {
+    document.querySelectorAll('#tbl-users tbody input,#tbl-users tbody select').forEach(inp => {
+      const i = +inp.dataset.u, f = inp.dataset.f;
+      if (settings.users[i]) settings.users[i][f] = inp.value;
     });
   }
 
@@ -1898,14 +1929,29 @@
     $('s-maxaspect').value = settings.maxaspect;
     $('s-split').checked = !!settings.autosplit;
     $('s-refcolor').value = settings.refcolor;
+    $('s-refcolor-fish').value = settings.refcolorFish || '#8a6a3a';
     $('s-userefcolor').checked = settings.userefcolor;
     $('s-demax').value = settings.demax;
+    $('s-demax-fish').value = settings.demaxFish || 12;
     $('s-webhook').value = settings.webhook || '';
     $('s-theme').value = settings.theme;
     $('s-sieveunit').value = settings.sieveUnit || 'mm';
+    const lp = $('logo-preview');
+    if (settings.logo) { lp.src = settings.logo; lp.hidden = false; } else lp.hidden = true;
     renderThemeSwatches();
     renderSpecEditor();
     renderUsersEditor();
+  }
+
+  /* ---------------- โลโก้องค์กร (อัปโหลดไฟล์) ---------------- */
+  function applyLogo() {
+    const logo = settings.logo;
+    // หัวแอป
+    const hi = $('header-logo-img'), hs = document.querySelector('.logo .logo-machine');
+    if (hi && hs) { if (logo) { hi.src = logo; hi.hidden = false; hs.style.display = 'none'; } else { hi.hidden = true; hs.style.display = ''; } }
+    // หน้าล็อก
+    const li = $('lock-logo-img'), lm = document.querySelector('.lock-logo .lock-machine');
+    if (li && lm) { if (logo) { li.src = logo; li.hidden = false; lm.style.display = 'none'; } else { li.hidden = true; lm.style.display = ''; } }
   }
 
   function renderThemeSwatches() {
@@ -1929,8 +1975,29 @@
       renderSpecEditor();
     });
     $('btn-add-user').addEventListener('click', () => {
-      settings.users.push({ name: '', pin: '', role: 'inspector' });
+      settings.users.push({ name: '', pin: '', role: 'inspector', factory: '' });
       renderUsersEditor();
+    });
+    // อัปโหลดไฟล์โลโก้ (ย่อ ≤256px เก็บเป็น data URL)
+    $('s-logo-file').addEventListener('change', e => {
+      const f = e.target.files[0]; e.target.value = '';
+      if (!f) return;
+      const img = new Image();
+      img.onload = () => {
+        const s = Math.min(1, 256 / Math.max(img.width, img.height));
+        const c = document.createElement('canvas');
+        c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+        c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+        settings.logo = c.toDataURL('image/png');
+        saveSettings();
+        $('logo-preview').src = settings.logo; $('logo-preview').hidden = false;
+        applyLogo();
+        toast(t('s_logo_set') + ' — ' + t('saving'));
+      };
+      img.src = URL.createObjectURL(f);
+    });
+    $('btn-logo-clear').addEventListener('click', () => {
+      settings.logo = null; saveSettings(); $('logo-preview').hidden = true; applyLogo();
     });
     $('s-theme').addEventListener('input', e => {
       settings.theme = e.target.value;
@@ -1944,6 +2011,8 @@
     });
     $('btn-save-settings').addEventListener('click', () => {
       if (!isAdmin()) { toast(t('admin_only')); return; }
+      readSpecEditor();   // อ่านค่าตารางสเปก/ตะแกรง + ผู้ใช้ ที่ยังไม่ commit ก่อนบันทึก
+      readUsersEditor();
       settings.mmpp = parseFloat($('s-mmpp').value) || 0;
       settings.operator = $('s-operator').value;
       settings.bins = $('s-bins').value || DEFAULTS.bins;
@@ -1953,8 +2022,10 @@
       settings.maxaspect = parseFloat($('s-maxaspect').value) || DEFAULTS.maxaspect;
       settings.autosplit = $('s-split').checked;
       settings.refcolor = $('s-refcolor').value;
+      settings.refcolorFish = $('s-refcolor-fish').value;
       settings.userefcolor = $('s-userefcolor').checked;
       settings.demax = parseFloat($('s-demax').value) || DEFAULTS.demax;
+      settings.demaxFish = parseFloat($('s-demax-fish').value) || DEFAULTS.demaxFish;
       settings.webhook = $('s-webhook').value.trim();
       settings.theme = $('s-theme').value || DEFAULTS.theme;
       settings.users = settings.users.filter(u => u.name && /^\d{4,8}$/.test(String(u.pin)));
@@ -2051,6 +2122,9 @@
   applyTheme(settings.theme || DEFAULTS.theme);
   I18N.apply();
   initLock();
+  applyLogo();
+  // ดึงโลโก้องค์กรจากออนไลน์มาแสดงบนหน้าล็อกด้วย (กรณียังไม่ล็อกอิน)
+  DB.getConfig().then(cfg => { if (cfg && cfg.logo) { settings.logo = cfg.logo; applyLogo(); } }).catch(() => {});
   if (isUnlocked()) showApp();
   else $('lock-input').focus();
   window.addEventListener('online', () => { checkNet(); });
