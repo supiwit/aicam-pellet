@@ -33,7 +33,7 @@ const DB = (() => {
   async function listSessions(limit = 200, factory = null) {
     let q = client
       .from('measurement_sessions')
-      .select('id, created_at, sample_name, operator, pellet_count, avg_length_mm, avg_diameter_mm, image_url, die_size, insize_pct, spec_pass, factory, product, shift, fines_pct, pdi')
+      .select('id, created_at, sample_name, operator, pellet_count, avg_length_mm, avg_diameter_mm, image_url, die_size, insize_pct, spec_pass, factory, product, shift, stage, fines_pct, pdi, density')
       .order('created_at', { ascending: false })
       .limit(limit);
     if (factory) q = q.eq('factory', factory);
@@ -74,5 +74,17 @@ const DB = (() => {
     return count || 0;
   }
 
-  return { saveSession, listSessions, getSession, deleteSession, ping, countSessions };
+  // ---- ตั้งค่ามาตรฐานองค์กร (ใช้ร่วมทุกเครื่อง) ----
+  async function getConfig() {
+    const { data, error } = await client.from('app_config').select('data').eq('id', 'global').maybeSingle();
+    if (error) throw error;
+    return data ? data.data : null;
+  }
+  async function saveConfig(data) {
+    const { error } = await client.from('app_config')
+      .upsert({ id: 'global', data, updated_at: new Date().toISOString() });
+    if (error) throw error;
+  }
+
+  return { saveSession, listSessions, getSession, deleteSession, ping, countSessions, getConfig, saveConfig };
 })();

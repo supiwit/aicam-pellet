@@ -17,21 +17,38 @@
 <div id="lock-screen" class="lock-screen">
   <div class="lock-card">
     <div class="lock-logo">
-      <svg viewBox="0 0 120 120" width="92" height="92">
+      <svg class="lock-machine" viewBox="0 0 160 120" width="180" height="135" aria-hidden="true">
         <defs>
-          <linearGradient id="lg" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0" stop-color="#34d399"/><stop offset="1" stop-color="#0ea5e9"/>
-          </linearGradient>
+          <linearGradient id="lkBody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fffdf7"/><stop offset="1" stop-color="#cdbb90"/></linearGradient>
+          <linearGradient id="lkSteel" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#eef2f4"/><stop offset="1" stop-color="#9aa3a8"/></linearGradient>
+          <radialGradient id="lkDie" cx="0.42" cy="0.4" r="0.62"><stop offset="0" stop-color="#cdbb8e"/><stop offset="1" stop-color="#6e5f3c"/></radialGradient>
         </defs>
-        <circle cx="60" cy="60" r="54" fill="none" stroke="url(#lg)" stroke-width="5" class="lock-ring"/>
-        <g class="lock-pellets">
-          <rect x="32" y="42" width="26" height="11" rx="5" fill="#facc15" transform="rotate(-18 45 47)"/>
-          <rect x="58" y="52" width="30" height="11" rx="5" fill="#fbbf24" transform="rotate(12 73 57)"/>
-          <rect x="40" y="66" width="34" height="11" rx="5" fill="#f59e0b" transform="rotate(-6 57 71)"/>
-        </g>
+        <path d="M30 10 h34 l-7 16 h-20 Z" fill="url(#lkSteel)" stroke="#7c858a"/>
+        <rect x="26" y="28" width="92" height="18" rx="9" fill="url(#lkSteel)" stroke="#8a9398"/>
+        <circle cx="26" cy="37" r="10" fill="#2f7fd1" stroke="#15497c" stroke-width="1.5"/>
+        <g class="m-fan"><path d="M26 32 v10 M21 37 h10 M22.5 33.5 l7 7 M29.5 33.5 l-7 7" stroke="#bcd6f0" stroke-width="1.6" stroke-linecap="round"/></g>
+        <rect x="52" y="50" width="74" height="48" rx="11" fill="url(#lkBody)" stroke="#b09b6a" stroke-width="1.6"/>
+        <circle cx="89" cy="76" r="21" fill="url(#lkDie)" stroke="#4f4329" stroke-width="2.4"/>
+        <g class="m-die"><circle cx="89" cy="76" r="18" fill="none" stroke="#5e5132" stroke-width="2" stroke-dasharray="2.5 6"/></g>
+        <circle cx="89" cy="76" r="6" fill="#4f4329"/>
+        <path d="M89 97 l24 18 l-8 6 l-24 -16 Z" fill="#c2b893" stroke="#a89a6e"/>
+        <rect x="48" y="112" width="80" height="8" rx="3" fill="#7d8488"/>
+        <g class="m-pellets"><rect class="mp mp1" x="112" y="113" width="8" height="5" rx="2.5" fill="#caa15a"/><rect class="mp mp2" x="118" y="113" width="8" height="5" rx="2.5" fill="#d8b06a"/></g>
       </svg>
     </div>
-    <h1 data-i18n="lock_title">AICAM Pellet Analyzer</h1>
+    <div class="lock-brand">
+      <h1 data-i18n="lock_title">AICAM Pellet Analyzer</h1>
+      <svg class="cpv-logo lock-cpv" viewBox="0 0 100 100" width="34" height="34" aria-label="C.P. Vietnam">
+        <rect x="4" y="4" width="92" height="92" rx="22" fill="#fff"/>
+        <rect x="22" y="20" width="56" height="56" rx="15" fill="none" stroke="#009a3d" stroke-width="6"/>
+        <g fill="#009a3d" transform="translate(50,66)">
+          <path transform="rotate(0)" d="M0 0 C -8 -11,-8 -27,0 -35 C 8 -27,8 -11,0 0 Z"/>
+          <path transform="rotate(-36)" d="M0 -2 C -6 -10,-6 -24,0 -30 C 6 -24,6 -10,0 -2 Z"/>
+          <path transform="rotate(36)" d="M0 -2 C -6 -10,-6 -24,0 -30 C 6 -24,6 -10,0 -2 Z"/>
+        </g>
+        <rect x="44" y="42" width="12" height="12" rx="1.5" transform="rotate(45 50 48)" fill="#fff"/>
+      </svg>
+    </div>
     <p id="lock-prompt" data-i18n="lock_pick">เลือกผู้ใช้แล้วกรอกรหัส</p>
     <div id="lock-users" class="lock-users"></div>
     <input type="password" id="lock-input" inputmode="numeric" autocomplete="off" data-i18n-ph="lock_placeholder" placeholder="รหัสผ่าน">
@@ -49,8 +66,29 @@
 <div id="app" hidden>
 
 <header class="topbar">
-  <div class="logo">🌾 AICAM <span>Pellet Analyzer</span></div>
+  <div class="logo">
+    <svg class="logo-machine" viewBox="0 0 64 64" width="30" height="30" aria-hidden="true">
+      <rect x="14" y="10" width="30" height="9" rx="4.5" fill="#facc15" stroke="#b98900"/>
+      <circle cx="15" cy="14.5" r="6" fill="#2f7fd1" stroke="#15497c"/>
+      <rect x="18" y="22" width="28" height="22" rx="6" fill="#fffdf7" stroke="#b09b6a" stroke-width="1.5"/>
+      <circle cx="32" cy="33" r="9" fill="#cdbb8e" stroke="#5e5132" stroke-width="1.5"/>
+      <circle cx="32" cy="33" r="3" fill="#5e5132"/>
+      <rect x="16" y="46" width="32" height="5" rx="2" fill="#7d8488"/>
+      <rect x="44" y="48" width="6" height="3" rx="1.5" fill="#caa15a"/>
+    </svg>
+    <span class="logo-txt">AICAM <span>Pellet Analyzer</span></span>
+  </div>
   <div class="topbar-right">
+    <svg class="cpv-logo" viewBox="0 0 100 100" width="26" height="26" aria-label="C.P. Vietnam" title="C.P. Vietnam">
+      <rect x="4" y="4" width="92" height="92" rx="22" fill="#fff"/>
+      <rect x="22" y="20" width="56" height="56" rx="15" fill="none" stroke="#009a3d" stroke-width="6"/>
+      <g fill="#009a3d" transform="translate(50,66)">
+        <path transform="rotate(0)" d="M0 0 C -8 -11,-8 -27,0 -35 C 8 -27,8 -11,0 0 Z"/>
+        <path transform="rotate(-36)" d="M0 -2 C -6 -10,-6 -24,0 -30 C 6 -24,6 -10,0 -2 Z"/>
+        <path transform="rotate(36)" d="M0 -2 C -6 -10,-6 -24,0 -30 C 6 -24,6 -10,0 -2 Z"/>
+      </g>
+      <rect x="44" y="42" width="12" height="12" rx="1.5" transform="rotate(45 50 48)" fill="#fff"/>
+    </svg>
     <span id="offline-badge" class="offline-badge" hidden title="ออฟไลน์ — ค้างรอซิงค์">⏳ <span id="offline-count">0</span></span>
     <button id="user-badge" class="user-badge" hidden title="ออกจากระบบ"></button>
     <select id="lang-select" class="lang-select" title="Language">
@@ -64,87 +102,6 @@
 
 <!-- ============ TAB: วัดขนาด ============ -->
 <main id="tab-measure" class="tab active">
-
-  <section class="hero anim-in">
-    <svg class="hero-machine" viewBox="0 0 320 230" preserveAspectRatio="xMidYMid meet" aria-hidden="true">
-      <defs>
-        <linearGradient id="mBody" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fffdf7"/><stop offset="1" stop-color="#cdbb90"/></linearGradient>
-        <linearGradient id="mSteel" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#eef2f4"/><stop offset=".5" stop-color="#c3ccd1"/><stop offset="1" stop-color="#9aa3a8"/></linearGradient>
-        <linearGradient id="mHop" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#dde3e7"/><stop offset="1" stop-color="#8e979c"/></linearGradient>
-        <radialGradient id="mDie" cx="0.42" cy="0.4" r="0.62"><stop offset="0" stop-color="#cdbb8e"/><stop offset="1" stop-color="#6e5f3c"/></radialGradient>
-        <radialGradient id="mMotor" cx="0.4" cy="0.35" r="0.7"><stop offset="0" stop-color="#5aa0e0"/><stop offset="1" stop-color="#1b5e9e"/></radialGradient>
-        <linearGradient id="mBase" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#8b9298"/><stop offset="1" stop-color="#596065"/></linearGradient>
-        <linearGradient id="mGloss" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity=".55"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient>
-      </defs>
-
-      <!-- ฮอปเปอร์ป้อน + ไอน้ำ -->
-      <g class="m-steam">
-        <circle cx="60" cy="14" r="5" fill="#cfe3f5" opacity=".5"/>
-        <circle cx="70" cy="9" r="4" fill="#cfe3f5" opacity=".4"/>
-        <circle cx="52" cy="8" r="3.5" fill="#cfe3f5" opacity=".35"/>
-      </g>
-      <path d="M40 20 h60 l-12 26 h-36 Z" fill="url(#mHop)" stroke="#7c858a" stroke-width="1.2"/>
-      <rect x="40" y="16" width="60" height="6" rx="3" fill="#7c858a"/>
-
-      <!-- เพลาคอนดิชันเนอร์ (ถังผสมไอน้ำ) + มอเตอร์ -->
-      <rect x="44" y="48" width="150" height="30" rx="15" fill="url(#mSteel)" stroke="#8a9398" stroke-width="1.5"/>
-      <rect x="50" y="52" width="140" height="7" rx="3.5" fill="url(#mGloss)"/>
-      <g><rect x="70" y="44" width="3" height="6" fill="#8a9398"/><rect x="100" y="44" width="3" height="6" fill="#8a9398"/><rect x="130" y="44" width="3" height="6" fill="#8a9398"/><rect x="160" y="44" width="3" height="6" fill="#8a9398"/></g>
-      <circle cx="44" cy="63" r="15" fill="url(#mMotor)" stroke="#15497c" stroke-width="2"/>
-      <g class="m-fan"><path d="M44 56 v14 M37 63 h14 M39 58 l10 10 M49 58 l-10 10" stroke="#bcd6f0" stroke-width="2" stroke-linecap="round"/></g>
-      <rect x="188" y="50" width="20" height="26" rx="4" fill="url(#mSteel)" stroke="#8a9398"/>
-
-      <!-- ท่อเชื่อมลงเครื่องอัด -->
-      <path d="M150 78 q6 14 0 24" fill="none" stroke="url(#mSteel)" stroke-width="14" stroke-linecap="round"/>
-
-      <!-- ตัวเรือนเครื่องอัดเม็ด -->
-      <rect x="92" y="96" width="120" height="78" rx="16" fill="url(#mBody)" stroke="#b09b6a" stroke-width="2"/>
-      <rect x="100" y="102" width="104" height="9" rx="4" fill="url(#mGloss)"/>
-      <!-- น็อตยึดรอบฝา -->
-      <g fill="#9c8b66"><circle cx="102" cy="108" r="2.4"/><circle cx="202" cy="108" r="2.4"/><circle cx="102" cy="162" r="2.4"/><circle cx="202" cy="162" r="2.4"/></g>
-
-      <!-- หัวดาย (ring die) หมุน + ลูกกลิ้ง -->
-      <circle cx="152" cy="135" r="34" fill="url(#mDie)" stroke="#4f4329" stroke-width="3"/>
-      <circle cx="152" cy="135" r="34" fill="none" stroke="#000" stroke-opacity=".15" stroke-width="6"/>
-      <g class="m-die">
-        <circle cx="152" cy="135" r="30" fill="none" stroke="#5e5132" stroke-width="2.5" stroke-dasharray="2.5 6"/>
-        <circle cx="152" cy="135" r="20" fill="none" stroke="#7a6a45" stroke-width="2" stroke-dasharray="2 5"/>
-      </g>
-      <circle cx="152" cy="135" r="9" fill="#4f4329"/>
-      <circle cx="152" cy="135" r="3.5" fill="#cdbb8e"/>
-      <!-- ลูกกลิ้งอัด 2 ตัว -->
-      <circle cx="139" cy="123" r="9" fill="url(#mSteel)" stroke="#7c858a" stroke-width="1.5"/>
-      <circle cx="167" cy="126" r="9" fill="url(#mSteel)" stroke="#7c858a" stroke-width="1.5"/>
-      <circle cx="139" cy="123" r="3" fill="#7c858a"/><circle cx="167" cy="126" r="3" fill="#7c858a"/>
-
-      <!-- ใบมีดตัด + รางออกเม็ด -->
-      <path d="M152 169 l40 30 l-12 9 l-40 -27 Z" fill="#c2b893" stroke="#a89a6e" stroke-width="1.4"/>
-      <rect x="186" y="196" width="44" height="7" rx="3" fill="url(#mSteel)" transform="rotate(8 186 196)"/>
-
-      <!-- ฐานเครื่อง + ขา -->
-      <rect x="86" y="196" width="132" height="16" rx="4" fill="url(#mBase)"/>
-      <rect x="104" y="174" width="16" height="24" fill="#7d8488"/>
-      <rect x="184" y="174" width="16" height="24" fill="#7d8488"/>
-      <ellipse cx="152" cy="216" rx="84" ry="6" fill="#000" opacity=".12"/>
-
-      <!-- กล่องควบคุม -->
-      <rect x="222" y="110" width="34" height="46" rx="5" fill="url(#mSteel)" stroke="#8a9398" stroke-width="1.5"/>
-      <circle cx="231" cy="120" r="3" fill="#4ade80" class="m-led"/>
-      <circle cx="241" cy="120" r="3" fill="#facc15"/>
-      <rect x="227" y="128" width="24" height="9" rx="2" fill="#11331f"/>
-      <rect x="227" y="141" width="24" height="9" rx="2" fill="#1f2937"/>
-
-      <!-- เม็ดอาหารไหลออก (อนิเมชั่น) -->
-      <g class="m-pellets">
-        <rect class="mp mp1" x="196" y="198" width="11" height="6" rx="3" fill="#caa15a"/>
-        <rect class="mp mp2" x="205" y="198" width="11" height="6" rx="3" fill="#d8b06a"/>
-        <rect class="mp mp3" x="200" y="198" width="11" height="6" rx="3" fill="#c8995a"/>
-        <rect class="mp mp4" x="210" y="198" width="11" height="6" rx="3" fill="#e0bb76"/>
-      </g>
-      <ellipse cx="216" cy="210" rx="26" ry="6" fill="#caa15a" opacity=".55"/>
-      <g fill="#caa15a"><rect x="200" y="206" width="9" height="5" rx="2.5"/><rect x="212" y="207" width="9" height="5" rx="2.5" fill="#d8b06a"/><rect x="206" y="203" width="9" height="5" rx="2.5" fill="#c8995a"/></g>
-    </svg>
-  </section>
 
   <section class="card anim-in">
     <h2 data-i18n="cap_title">1. ถ่ายรูปเม็ดอาหาร</h2>
@@ -321,6 +278,14 @@
       </table>
     </details>
 
+    <!-- ความหนาแน่นอาหาร (Density) -->
+    <h3 data-i18n="density_title">⚖️ ความหนาแน่นอาหาร</h3>
+    <div class="form-grid">
+      <label><span data-i18n="f_weight"></span> <input type="number" id="f-weight" step="0.1" min="0" data-i18n-ph="f_weight_ph"></label>
+      <label><span data-i18n="f_volume"></span> <input type="number" id="f-volume" step="1" min="0" data-i18n-ph="f_volume_ph"></label>
+    </div>
+    <div id="density-out" class="density-out hint"></div>
+
     <h3 data-i18n="save_title">บันทึกผล</h3>
     <div class="form-grid">
       <label><span data-i18n="f_sample"></span> <input type="text" id="f-sample" data-i18n-ph="f_sample_ph"></label>
@@ -345,6 +310,7 @@
     <h2 data-i18n="rep_title">📊 รายงานผลการวัด</h2>
     <p class="hint" data-i18n="rep_hint"></p>
     <div id="factory-filter" class="factory-filter"></div>
+    <div id="stage-filter" class="factory-filter"></div>
     <div class="btn-row">
       <button class="btn small" id="btn-refresh" data-i18n="rep_refresh">🔄 โหลดใหม่</button>
       <button class="btn small" id="btn-export-all" data-i18n="rep_export">⬇️ CSV สรุปทั้งหมด</button>
@@ -381,6 +347,7 @@
 <main id="tab-settings" class="tab">
   <section class="card anim-in">
     <h2 data-i18n="set_title">⚙️ ตั้งค่า</h2>
+    <div id="role-note" class="warn-note" hidden></div>
     <div class="form-grid">
       <label><span data-i18n="s_mmpp"></span>
         <input type="number" id="s-mmpp" step="0.0001" min="0" data-i18n-ph="s_mmpp_ph">

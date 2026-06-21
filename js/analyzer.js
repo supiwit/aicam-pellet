@@ -495,35 +495,55 @@ const Analyzer = (() => {
     out.width = w; out.height = h;
     const octx = out.getContext('2d');
     octx.drawImage(canvas, 0, 0);
-    const drawBox = (b, stroke, axis) => {
+    const lw = Math.max(1.6, w / 700);
+    // กรอบเม็ดที่คัดออก (เส้นบางสี)
+    const drawReject = (b, stroke) => {
       octx.save();
       octx.translate(b.mx, b.my);
       octx.rotate(Math.atan2(b.sinT, b.cosT));
-      octx.strokeStyle = stroke;
-      octx.lineWidth = Math.max(1.5, w / 800);
+      octx.strokeStyle = stroke; octx.lineWidth = lw;
       octx.strokeRect(b.uMin, b.vMin, b.uMax - b.uMin, b.vMax - b.vMin);
-      if (axis) {
-        octx.strokeStyle = '#ff3b30';
-        octx.beginPath();
-        octx.moveTo(b.uMin, 0); octx.lineTo(b.uMax, 0);
-        octx.stroke();
-      }
       octx.restore();
     };
-    // เม็ดที่วัด = กรอบเหลือง (แกนแดง) · เม็ดติดกัน = ส้ม · สิ่งแปลกปลอม = ม่วง · ชนขอบ/ผิดขนาด = ขาวจาง
+    // เม็ดที่วัด: เติมสีเขียวจาง + กรอบเขียว + เส้นวัดความยาวสีแดงมีขีดปลายชัด (เน้น "การตัดเม็ด")
+    const drawPellet = (b) => {
+      octx.save();
+      octx.translate(b.mx, b.my);
+      octx.rotate(Math.atan2(b.sinT, b.cosT));
+      octx.fillStyle = 'rgba(34,197,94,.16)';
+      octx.fillRect(b.uMin, b.vMin, b.uMax - b.uMin, b.vMax - b.vMin);
+      octx.strokeStyle = '#22c55e'; octx.lineWidth = lw;
+      octx.strokeRect(b.uMin, b.vMin, b.uMax - b.uMin, b.vMax - b.vMin);
+      // เส้นวัดความยาว + ขีดปลายทั้งสองข้าง (caliper)
+      const cap = Math.max(3, Math.abs(b.vMax) * 0.7);
+      octx.strokeStyle = '#ff3b30'; octx.lineWidth = lw * 1.1;
+      octx.beginPath();
+      octx.moveTo(b.uMin, 0); octx.lineTo(b.uMax, 0);
+      octx.moveTo(b.uMin, -cap); octx.lineTo(b.uMin, cap);
+      octx.moveTo(b.uMax, -cap); octx.lineTo(b.uMax, cap);
+      octx.stroke();
+      octx.restore();
+    };
     const rejColor = { clump: '#fb923c', foreign: '#c084fc' };
-    rejectedBoxes.forEach(b => drawBox(b, rejColor[b.reason] || 'rgba(255,255,255,.4)', false));
-    accepted.forEach(b => drawBox(b, '#facc15', true));
-    octx.font = `bold ${Math.max(11, w / 85)}px sans-serif`;
-    octx.fillStyle = '#4ade80';
-    octx.strokeStyle = 'rgba(0,0,0,.6)';
-    octx.lineWidth = 3;
-    octx.textAlign = 'center';
-    accepted.forEach(b => {
-      const tx = b.mx, ty = b.my - (Math.abs(b.vMax) + 5);
-      octx.strokeText(b.lenMm.toFixed(1), tx, ty);
-      octx.fillText(b.lenMm.toFixed(1), tx, ty);
+    rejectedBoxes.forEach(b => drawReject(b, rejColor[b.reason] || 'rgba(255,255,255,.45)'));
+    accepted.forEach(drawPellet);
+    // ป้ายเลข+ความยาว แบบชิปอ่านง่าย
+    const fs = Math.max(11, w / 80);
+    octx.font = `bold ${fs}px sans-serif`;
+    octx.textAlign = 'center'; octx.textBaseline = 'middle';
+    accepted.forEach((b, i) => {
+      const label = b.lenMm.toFixed(1);
+      const tx = b.mx, ty = b.my - (Math.abs(b.vMax) + fs * 0.9);
+      const wd = octx.measureText(label).width + fs * 0.7;
+      octx.fillStyle = 'rgba(17,24,39,.78)';
+      octx.beginPath();
+      (octx.roundRect ? octx.roundRect(tx - wd / 2, ty - fs * 0.7, wd, fs * 1.4, fs * 0.4)
+                      : octx.rect(tx - wd / 2, ty - fs * 0.7, wd, fs * 1.4));
+      octx.fill();
+      octx.fillStyle = '#4ade80';
+      octx.fillText(label, tx, ty);
     });
+    octx.textBaseline = 'alphabetic';
 
     return {
       pellets: accepted.map(b => ({

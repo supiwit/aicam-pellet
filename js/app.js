@@ -144,6 +144,7 @@
     theme: '#1b6e5a',
     reportFactory: '',
     sieveUnit: 'mm',   // 'mm' หรือ 'mesh'
+    reportStage: '',
     users: [{ name: 'Admin', pin: '1234', role: 'admin' }],  // ข้อ 7: ผู้ใช้ + สิทธิ์
     specs: DEFAULT_SPECS,
   };
@@ -167,6 +168,27 @@
 
   function saveSettings() {
     localStorage.setItem('aicam-settings', JSON.stringify(settings));
+  }
+
+  // คีย์ที่ใช้ร่วมทุกเครื่อง (เก็บออนไลน์) — มาตรฐาน QC องค์กร
+  // (mmpp/colorGain = เฉพาะกล้องของเครื่องนั้น · theme/lang = ความชอบส่วนตัว → ไม่ sync)
+  const SHARED_KEYS = ['specs', 'users', 'demax', 'bins', 'binsUnit', 'maxaspect', 'minlen', 'maxlen', 'refcolor', 'webhook', 'sieveUnit', 'polarity'];
+  async function loadSharedConfig() {
+    try {
+      const cfg = await DB.getConfig();
+      if (cfg && typeof cfg === 'object') {
+        SHARED_KEYS.forEach(k => { if (cfg[k] !== undefined) settings[k] = cfg[k]; });
+        if (Array.isArray(settings.specs)) settings.specs.forEach(fillSieveDefaults);
+        localStorage.setItem('aicam-settings', JSON.stringify(settings));
+        return true;
+      }
+    } catch (e) { /* ออฟไลน์: ใช้ค่าในเครื่อง */ }
+    return false;
+  }
+  async function saveSharedConfig() {
+    const cfg = {};
+    SHARED_KEYS.forEach(k => { cfg[k] = settings[k]; });
+    try { await DB.saveConfig(cfg); return true; } catch (e) { return false; }
   }
   function binsArray() {
     return settings.bins.split(',').map(s => parseFloat(s.trim())).filter(v => !isNaN(v) && v > 0);
@@ -388,6 +410,16 @@
     updateCalibStatus();
     checkNet();
 
+    // ดึงตั้งค่ามาตรฐานองค์กรจากออนไลน์ ให้ทุกเครื่องตรงกัน
+    loadSharedConfig().then(ok => {
+      if (ok) {
+        syncSettingsForm();
+        populateDieSelect();
+        renderLockUsers();
+        applyRole();
+      }
+    });
+
     $('lang-select').value = I18N.lang;
     $('lang-select').addEventListener('change', e => I18N.setLang(e.target.value));
     document.addEventListener('langchange', onLangChange);
@@ -425,8 +457,13 @@
     populateStageSelect();
     populateRefSelect();
     renderSpecEditor();
+    renderUsersEditor();
     Learn.render();
+    renderDensity();
+    applyRole();
     if (state.results) renderResults(false);
+    if ($('tab-reports').classList.contains('active')) loadReports();
+    if ($('tab-settings').classList.contains('active')) renderStorageMeter();
   }
 
   /* ---------------- โรงงาน / ชนิดอาหาร / กะ / วัตถุอ้างอิง ---------------- */
@@ -986,30 +1023,40 @@
   /* หาสีที่ห่างจาก baseLab เท่ากับ target (ΔE) โดยเลื่อนใน Lab */
   function colorAtDeltaE(baseLab, target) {
     if (target <= 0) return baseLab;
-    let dir = [1, -0.35, -0.6];
+    // ทิศทางเลื่อนในปริภูมิ Lab (สว่างขึ้น + เหลืองลง) ค้นด้วย ΔE00 จริง
+    let dir = [1.1, -0.25, -0.7];
     const nrm = Math.hypot(...dir); dir = dir.map(x => x / nrm);
-    let lo = 0, hi = 80;
-    for (let it = 0; it < 28; it++) {
+    let lo = 0, hi = 120;
+    for (let it = 0; it < 30; it++) {
       const m = (lo + hi) / 2;
       const cand = { l: baseLab.l + dir[0] * m, a: baseLab.a + dir[1] * m, b: baseLab.b + dir[2] * m };
-      (Analyzer.deltaE(baseLab, cand) < target) ? (lo = m) : (hi = m);
+      (Analyzer.deltaE2000(baseLab, cand) < target) ? (lo = m) : (hi = m);
     }
     const m = (lo + hi) / 2;
-    return { l: baseLab.l + dir[0] * m, a: baseLab.a + dir[1] * m, b: baseLab.b + dir[2] * m };
+    return { l: Math.max(0, Math.min(100, baseLab.l + dir[0] * m)), a: baseLab.a + dir[1] * m, b: baseLab.b + dir[2] * m };
   }
 
   /* แถบสเกลสี ΔE00 = 0, 10, 20 จากสีตัวอย่าง */
-  function renderColorRange(baseLab) {
+  function renderColorRange(baseLab, sampleDe) {
     const box = $('color-range');
     if (!box || !baseLab) { if (box) box.hidden = true; return; }
-    const targets = [0, 10, 20];
+    const targets = [0, 5, 10, 15, 20];
     box.hidden = false;
-    box.innerHTML = `<div class="cr-title">${t('color_range_title')}</div><div class="cr-swatches">` +
-      targets.map(tg => {
-        const lab = colorAtDeltaE(baseLab, tg);
-        const [r, g, b] = lab2rgb(lab.l, lab.a, lab.b);
-        return `<div class="cr-item"><div class="cr-sw" style="background:rgb(${r},${g},${b})"></div><div class="cr-lab">ΔE00<br><b>${tg}</b></div></div>`;
-      }).join('') + '</div>';
+    const swatches = targets.map(tg => {
+      const lab = tg === 0 ? baseLab : colorAtDeltaE(baseLab, tg);
+      const [r, g, b] = lab2rgb(lab.l, lab.a, lab.b);
+      return `<div class="cr-item"><div class="cr-sw" style="background:rgb(${r},${g},${b})"></div><div class="cr-lab"><b>${tg}</b></div></div>`;
+    }).join('');
+    // เครื่องหมายตำแหน่ง ΔE00 จริงของตัวอย่าง (ถ้าเทียบสีอ้างอิง)
+    let marker = '';
+    if (sampleDe != null) {
+      const pos = Math.max(0, Math.min(100, sampleDe / 20 * 100));
+      const cls = sampleDe <= +settings.demax ? 'ok' : 'bad';
+      marker = `<div class="cr-marker-wrap"><div class="cr-marker ${cls}" style="left:${pos}%">▼ ${sampleDe.toFixed(1)}</div></div>`;
+    }
+    box.innerHTML = `<div class="cr-title">${t('color_range_title')}</div>` +
+      `<div class="cr-scale"><div class="cr-swatches">${swatches}</div>${marker}</div>` +
+      `<div class="cr-axis"><span>ΔE00</span><span>${t('color_range_legend')}</span></div>`;
   }
 
   function renderColor(stats) {
@@ -1038,7 +1085,9 @@
         <div class="lab-val"><b>${(+lab.b).toFixed(1)}</b><span>b* (−B / +Y)</span></div>
       </div>`;
 
-    if (settings.userefcolor) {
+    // อาหารปลา (extrusion) ไม่เทียบสีมาตรฐานแยก — แสดงค่าสีเฉยๆ
+    const isFish = state.results && state.results.productAuto === 'fish';
+    if (settings.userefcolor && !isFish) {
       const ref = hexToRgb(settings.refcolor);
       const refLab = Analyzer.rgb2lab(ref.r, ref.g, ref.b);
       const de76 = Analyzer.deltaE(lab, refLab);
@@ -1071,7 +1120,7 @@
     }
     $('lab-panel').innerHTML = labHtml;
     $('lab-panel').hidden = false;
-    renderColorRange(lab);
+    renderColorRange(lab, (settings.userefcolor && !isFish) ? ac.delta_e00 : null);
   }
 
   /* ---------------- คุณภาพหน้าตัดเม็ด ---------------- */
@@ -1156,7 +1205,43 @@
     }
   }
 
+  /* ---------------- ความหนาแน่นอาหาร (ข้อ 8) ----------------
+   * Bulk density (g/L) = น้ำหนัก ÷ ปริมาตรภาชนะ × 1000 (วิธีถ้วยตวงมาตรฐาน)
+   * Particle density (g/cm³) = น้ำหนัก ÷ ปริมาตรเม็ดรวมจากภาพ (Σ π/4·d²·L)
+   */
+  function computeDensity() {
+    const w = parseFloat($('f-weight').value) || 0;     // กรัม
+    const vol = parseFloat($('f-volume').value) || 0;   // มล. (= cm³)
+    let bulk = null, particle = null;
+    if (w > 0 && vol > 0) bulk = w / vol * 1000;        // g/L
+    if (w > 0 && state.results && state.results.pellets && state.results.pellets.length) {
+      const sumMm3 = state.results.pellets.reduce((s, p) =>
+        s + Math.PI / 4 * p.diameter_mm * p.diameter_mm * p.length_mm, 0);
+      const cm3 = sumMm3 / 1000;
+      if (cm3 > 0) {
+        const pd = w / cm3;                              // g/cm³
+        if (pd >= 0.3 && pd <= 2.0) particle = pd;       // เฉพาะค่าที่สมเหตุสมผล (น้ำหนัก = เม็ดในภาพ)
+      }
+    }
+    return { weight: w || null, volume: vol || null,
+      bulk_gL: bulk != null ? +bulk.toFixed(0) : null,
+      particle_gcm3: particle != null ? +particle.toFixed(3) : null };
+  }
+  function renderDensity() {
+    const out = $('density-out');
+    if (!out) return;
+    const d = computeDensity();
+    const parts = [];
+    if (d.bulk_gL != null) {
+      const ok = d.bulk_gL >= 500 && d.bulk_gL <= 700;   // ช่วงอ้างอิงอาหารกุ้งทั่วไป
+      parts.push(`${t('density_bulk')}: <b>${d.bulk_gL} g/L</b> ${ok ? '✓' : '⚠️'}`);
+    }
+    if (d.particle_gcm3 != null) parts.push(`${t('density_particle')}: <b>${d.particle_gcm3} g/cm³</b>`);
+    out.innerHTML = parts.length ? parts.join(' · ') : t('density_hint');
+  }
+
   function initSaveShare() {
+    ['f-weight', 'f-volume'].forEach(id => { const e = $(id); if (e) e.addEventListener('input', renderDensity); });
     $('btn-save').addEventListener('click', async () => {
       if (!state.results) return;
       const btn = $('btn-save'), st = $('save-status');
@@ -1175,6 +1260,7 @@
           stage: settings.stage || null,
           fines_pct: state.results.yield ? state.results.yield.under_vol : null,
           pdi: parseFloat($('f-pdi').value) || null,
+          density: (() => { const d = computeDensity(); return (d.bulk_gL || d.particle_gcm3) ? d : null; })(),
           sample_name: $('f-sample').value || null,
           operator: $('f-operator').value || null,
           notes: $('f-notes').value || null,
@@ -1490,6 +1576,22 @@
     }));
   }
 
+  function renderStageFilter() {
+    const box = $('stage-filter');
+    if (!box) return;
+    const chips = [{ id: '', label: t('stage_all') }]
+      .concat(STAGES.filter(s => s.id).map(s => ({ id: s.id, label: stageName(s.id) })));
+    box.innerHTML = chips.map(c =>
+      `<button class="fchip ${(settings.reportStage || '') === c.id ? 'active' : ''}" data-sid="${c.id}">${c.label}</button>`
+    ).join('');
+    box.querySelectorAll('.fchip').forEach(b => b.addEventListener('click', () => {
+      settings.reportStage = b.dataset.sid;
+      saveSettings();
+      renderStageFilter();
+      loadReports();
+    }));
+  }
+
   /* สรุปผลรายวัน (ภาพรวม) จากรายการที่กรองแล้ว */
   function renderDaily(rows) {
     const box = $('daily-box'), list = $('daily-list');
@@ -1529,9 +1631,11 @@
   async function loadReports() {
     const list = $('report-list');
     renderFactoryFilter();
+    renderStageFilter();
     list.innerHTML = `<div class="empty">${t('rep_loading')}</div>`;
     try {
-      const rows = await DB.listSessions(300, settings.reportFactory || null);
+      let rows = await DB.listSessions(300, settings.reportFactory || null);
+      if (settings.reportStage) rows = rows.filter(r => r.stage === settings.reportStage);
       if (!rows.length) {
         $('trend-box').hidden = true;
         $('daily-box').hidden = true;
@@ -1862,12 +1966,17 @@
       populateDieSelect();
       renderSpecEditor();
       renderUsersEditor();
+      renderLockUsers();
       // คำนวณ yield ใหม่ถ้ามีผลค้างอยู่
       if (state.results && state.results.spec) {
         state.results.yield = computeYield(state.results.pellets, currentSpec() || state.results.spec);
       }
-      $('settings-status').textContent = t('s_saved');
-      setTimeout(() => { $('settings-status').textContent = ''; }, 2500);
+      $('settings-status').textContent = t('saving');
+      // บันทึกตั้งค่ามาตรฐานขึ้นออนไลน์ (ใช้ร่วมทุกเครื่อง)
+      saveSharedConfig().then(ok => {
+        $('settings-status').textContent = ok ? t('s_saved_sync') : t('s_saved');
+        setTimeout(() => { $('settings-status').textContent = ''; }, 2800);
+      });
     });
   }
 
@@ -1895,13 +2004,18 @@
     b.onclick = () => { if (confirm(t('logout_confirm'))) logout(); };
   }
   function applyRole() {
-    // ผู้ที่ไม่ใช่ admin: ซ่อนปุ่มบันทึกตั้งค่า + ปุ่มเพิ่ม/แก้สเปก-ผู้ใช้
+    // เฉพาะ admin เท่านั้นที่แก้ตั้งค่าได้ — inspector: ปิดทุก input + ซ่อนปุ่ม + แจ้งเตือน
     const admin = isAdmin();
-    ['btn-save-settings', 'btn-add-spec', 'btn-add-user'].forEach(id => {
-      const el = $(id); if (el) el.style.display = admin ? '' : 'none';
+    ['btn-save-settings', 'btn-add-spec', 'btn-add-user', 'btn-logout'].forEach(id => {
+      const el = $(id); if (el && id !== 'btn-logout') el.style.display = admin ? '' : 'none';
+    });
+    const tab = $('tab-settings');
+    if (tab) tab.querySelectorAll('input, select, button').forEach(el => {
+      if (el.id === 'btn-logout') { el.disabled = false; return; }   // ออกจากระบบได้เสมอ
+      el.disabled = !admin;
     });
     const note = $('role-note');
-    if (note) note.hidden = admin;
+    if (note) { note.hidden = admin; note.textContent = admin ? '' : '🔒 ' + t('admin_only'); }
   }
 
   /* ---------------- คิวออฟไลน์ (ข้อ 8) ---------------- */
