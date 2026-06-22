@@ -82,19 +82,31 @@
     [35, 0.50], [40, 0.425], [45, 0.355], [50, 0.30], [60, 0.25], [70, 0.212], [80, 0.18],
     [100, 0.15], [120, 0.125], [140, 0.106], [170, 0.090], [200, 0.075],
   ];
+  // แปลง mesh ↔ มม. แบบ interpolate เชิงเส้นระหว่างค่ามาตรฐาน
+  // (เดิมใช้ค่าใกล้สุดในตาราง → mesh 24 ถูกปัดเป็น 25 ทำให้ "บันทึกแล้วไม่จำค่า"; ตอนนี้รับเลข mesh อิสระได้)
   function meshToMm(mesh) {
     const m = +mesh;
     if (!(m > 0)) return 0;
-    let best = MESH_TABLE[0], bd = Infinity;
-    for (const [mn, mm] of MESH_TABLE) { const d = Math.abs(mn - m); if (d < bd) { bd = d; best = [mn, mm]; } }
-    return best[1];
+    const T = MESH_TABLE;
+    if (m <= T[0][0]) return T[0][1];
+    if (m >= T[T.length - 1][0]) return T[T.length - 1][1];
+    for (let i = 0; i < T.length - 1; i++) {
+      const [m1, v1] = T[i], [m2, v2] = T[i + 1];
+      if (m >= m1 && m <= m2) return +(v1 + (m - m1) / (m2 - m1) * (v2 - v1)).toFixed(4);
+    }
+    return T[T.length - 1][1];
   }
   function mmToMesh(mm) {
     const v = +mm;
     if (!(v > 0)) return 0;
-    let best = MESH_TABLE[0], bd = Infinity;
-    for (const row of MESH_TABLE) { const d = Math.abs(row[1] - v); if (d < bd) { bd = d; best = row; } }
-    return best[0];
+    const T = MESH_TABLE; // mesh มาก = ช่องเล็ก → คอลัมน์ mm เรียงจากมากไปน้อย
+    if (v >= T[0][1]) return T[0][0];
+    if (v <= T[T.length - 1][1]) return T[T.length - 1][0];
+    for (let i = 0; i < T.length - 1; i++) {
+      const [m1, v1] = T[i], [m2, v2] = T[i + 1]; // v1 > v2
+      if (v <= v1 && v >= v2) return Math.round((m1 + (v1 - v) / (v1 - v2) * (m2 - m1)) * 10) / 10;
+    }
+    return T[T.length - 1][0];
   }
   // โรงงานอาหารกุ้ง 4 แห่ง (เวียดนาม) — เก็บข้อมูลแยกกัน + สี/ไอคอนประจำโรงงาน
   const FACTORIES = [
@@ -111,7 +123,7 @@
   const factoryIcon = id => { const f = FACTORIES.find(x => x.id === id); return f ? f.icon : '🏭'; };
 
   // ตำแหน่ง/จุดเก็บตัวอย่าง (stage) + ไอคอน
-  const STAGE_ICON = { machine: '⚙️', screen: '🧺', packing: '📦' };
+  const STAGE_ICON = { machine: '🏭', screen: '🥅', packing: '📦' };
   const STAGES = [
     { id: '', th: '— ไม่ระบุจุด —', vi: '— Không chọn —', en: '— No stage —' },
     { id: 'machine', th: 'หน้าเครื่อง', vi: 'Tại máy', en: 'At machine' },
@@ -1222,20 +1234,22 @@
    * Particle density (g/cm³) = น้ำหนัก ÷ ปริมาตรเม็ดรวมจากภาพ (Σ π/4·d²·L)
    */
   function computeDensity() {
-    const w = parseFloat($('f-weight').value) || 0;     // กรัม
-    const vol = parseFloat($('f-volume').value) || 0;   // มล. (= cm³)
-    let bulk = null, particle = null;
-    if (w > 0 && vol > 0) bulk = w / vol * 1000;        // g/L
-    if (w > 0 && state.results && state.results.pellets && state.results.pellets.length) {
+    const w = parseFloat($('f-weight').value) || 0;     // กรัม (น้ำหนักเม็ดที่ชั่ง)
+    const cont = parseFloat($('f-volume').value) || 0;  // มล. ปริมาตรภาชนะ (วิธีถ้วยตวง) — ไม่บังคับ
+    // ปริมาตรเม็ดวัดจากภาพ: Σ π/4·d²·L (mm³) → cm³
+    let imgVol = null, n = 0;
+    if (state.results && state.results.pellets && state.results.pellets.length) {
+      n = state.results.pellets.length;
       const sumMm3 = state.results.pellets.reduce((s, p) =>
         s + Math.PI / 4 * p.diameter_mm * p.diameter_mm * p.length_mm, 0);
-      const cm3 = sumMm3 / 1000;
-      if (cm3 > 0) {
-        const pd = w / cm3;                              // g/cm³
-        if (pd >= 0.3 && pd <= 2.0) particle = pd;       // เฉพาะค่าที่สมเหตุสมผล (น้ำหนัก = เม็ดในภาพ)
-      }
+      imgVol = sumMm3 / 1000;                            // cm³
     }
-    return { weight: w || null, volume: vol || null,
+    let bulk = null, particle = null;
+    if (w > 0 && cont > 0) bulk = w / cont * 1000;       // g/L (ต้องมีปริมาตรภาชนะ)
+    if (w > 0 && imgVol && imgVol > 0) particle = w / imgVol; // g/cm³ (น้ำหนัก = เม็ดในภาพ)
+    return {
+      weight: w || null, container: cont || null,
+      imgvol_cm3: imgVol != null ? +imgVol.toFixed(3) : null, count: n,
       bulk_gL: bulk != null ? +bulk.toFixed(0) : null,
       particle_gcm3: particle != null ? +particle.toFixed(3) : null };
   }
@@ -1244,12 +1258,20 @@
     if (!out) return;
     const d = computeDensity();
     const parts = [];
+    // 1) ปริมาตรเม็ดวัดจากภาพ — แสดงเสมอเมื่อมีผลวิเคราะห์
+    if (d.imgvol_cm3 != null) parts.push(`${t('density_imgvol')}: <b>${d.imgvol_cm3} cm³</b> · ${d.count} ${t('rep_items')}`);
+    // 2) ความหนาแน่นเม็ด (Particle) = น้ำหนัก ÷ ปริมาตรจากภาพ — แสดงเสมอ พร้อมธงเตือนถ้าผิดช่วง
+    if (d.particle_gcm3 != null) {
+      const ok = d.particle_gcm3 >= 0.9 && d.particle_gcm3 <= 1.6; // ช่วงอ้างอิงอาหารเม็ดทั่วไป
+      parts.push(`${t('density_particle')}: <b>${d.particle_gcm3} g/cm³</b> ${ok ? '✓' : '⚠️'}`);
+      if (!ok) parts.push(`<span class="hint">⚠️ ${t('density_particle_warn')}</span>`);
+    }
+    // 3) ความหนาแน่นรวม (Bulk) = น้ำหนัก ÷ ปริมาตรภาชนะ (ถ้ากรอก)
     if (d.bulk_gL != null) {
-      const ok = d.bulk_gL >= 500 && d.bulk_gL <= 700;   // ช่วงอ้างอิงอาหารกุ้งทั่วไป
+      const ok = d.bulk_gL >= 350 && d.bulk_gL <= 750;
       parts.push(`${t('density_bulk')}: <b>${d.bulk_gL} g/L</b> ${ok ? '✓' : '⚠️'}`);
     }
-    if (d.particle_gcm3 != null) parts.push(`${t('density_particle')}: <b>${d.particle_gcm3} g/cm³</b>`);
-    out.innerHTML = parts.length ? parts.join(' · ') : t('density_hint');
+    out.innerHTML = parts.length ? parts.join('<br>') : t('density_hint');
   }
 
   function initSaveShare() {
