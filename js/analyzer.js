@@ -290,10 +290,11 @@ const Analyzer = (() => {
    *  - solidity = พื้นที่จริง / พื้นที่ convex hull (ใช้คัดก้อนที่เป็นเม็ดติดกัน)
    */
   function measureComponent(px, w, data, core) {
-    // ตัดพิกเซลเงา/แสงนุ่มขอบเม็ดออกก่อนวัด (วัดเฉพาะเนื้อเม็ดจริง)
+    // ตัดพิกเซลเงา/แสงนุ่มขอบเม็ดออกก่อนวัด (วัดเฉพาะเนื้อเม็ดจริง ไม่กินเงา)
+    // ใช้ core ให้บ่อยขึ้น (floor 0.25) เพื่อกันเงา/ขอบเบลอเข้ามาขยายขนาด
     if (core) {
       const f = px.filter(i => core[i]);
-      if (f.length >= px.length * 0.4) px = f;
+      if (f.length >= px.length * 0.25) px = f;
     }
     const n = px.length;
     let minY = 1e9, maxY = -1e9;
@@ -415,9 +416,23 @@ const Analyzer = (() => {
     mask = erodeDilate(erodeDilate(mask, w, h, 'erode'), w, h, 'dilate');
     mask = fillHoles(mask, w, h);
 
+    // ---- ความคมชัด/โฟกัส (variance of Laplacian) — เตือนเมื่อภาพเบลอ/ไม่คม ----
+    // วัดเฉพาะบริเวณขอบเม็ด (ภายใน ±2px ของ mask) เพื่อไม่ให้พื้นหลังเรียบมากลบค่า
+    let lapSq = 0, lapN = 0;
+    for (let y = 1; y < h - 1; y++) {
+      for (let x = 1; x < w - 1; x++) {
+        const i = y * w + x;
+        if (!(mask[i] || mask[i - 1] || mask[i + 1] || mask[i - w] || mask[i + w])) continue;
+        const lap = 4 * gray[i] - gray[i - 1] - gray[i + 1] - gray[i - w] - gray[i + w];
+        lapSq += lap * lap; lapN++;
+      }
+    }
+    const focus = lapN ? Math.round(lapSq / lapN) : 0; // สูง = คม, ต่ำ = เบลอ
+    const blurry = lapN > 0 && focus < 90;
+
     // ---- core mask: ตัดขอบเงา/แสงนุ่ม (วัดเฉพาะเนื้อเม็ด ไม่กินเงา) ----
     const fgMean = fgN ? fgSum / fgN : thr;
-    const CORE = 0.30;
+    const CORE = 0.35;
     const core = new Uint8Array(w * h);
     for (let i = 0; i < core.length; i++) {
       core[i] = (fgBright ? gray[i] > thr + CORE * (fgMean - thr)
@@ -560,6 +575,7 @@ const Analyzer = (() => {
       splits: 0,
       annotated: out,
       threshold: thr,
+      focus, blurry,
     };
   }
 
@@ -569,6 +585,7 @@ const Analyzer = (() => {
    * @returns {found, mmpp, diaPx, annotated} หรือ {found:false}
    */
   function detectReference(img, knownMm, opts = {}) {
+    const isCard = opts.refShape === 'card';   // บัตร = สี่เหลี่ยม, อื่นๆ = เหรียญ/วงกลม
     const { canvas, scale } = toProcCanvas(img);
     const w = canvas.width, h = canvas.height;
     const ctx = canvas.getContext('2d');
@@ -611,28 +628,45 @@ const Analyzer = (() => {
       if (touch || px.length < 400) continue;          // ใหญ่พอและไม่ชนขอบ
       const m = measureComponent(px, w, data);
       const aspect = m.lengthPx / Math.max(1, m.diaPx);
-      const circleArea = Math.PI * (m.lengthPx / 2) ** 2;
-      const fill = px.length / circleArea;             // ใกล้ 1 = วงกลมเต็ม
-      if (aspect < 1.25 && m.solidity > 0.88 && fill > 0.80) {
-        if (!best || px.length > best.area) {
-          best = { area: px.length, diaEqProc: 2 * Math.sqrt(px.length / Math.PI), m };
+      if (isCard) {
+        // บัตร ATM/เครดิต = สี่เหลี่ยมผืนผ้า: เต็มกรอบ + อัตราส่วน "ทแยง/ด้านสั้น" ≈ 1.87 (เผื่อเอียง)
+        // ใช้ minFeret (= ด้านสั้น 53.98 มม.) ทนการหมุน ไม่ใช่ maxFeret ซึ่งเป็น "เส้นทแยง"
+        const rectFill = px.length / Math.max(1, m.lengthPx * m.diaPx);
+        if (m.solidity > 0.85 && rectFill > 0.70 && aspect > 1.50 && aspect < 2.15) {
+          if (!best || px.length > best.area) {
+            let nx = 1e9, xx = -1e9, ny = 1e9, xy = -1e9;
+            for (const idx of px) { const px0 = idx % w, py0 = (idx / w) | 0; if (px0 < nx) nx = px0; if (px0 > xx) xx = px0; if (py0 < ny) ny = py0; if (py0 > xy) xy = py0; }
+            best = { area: px.length, refDimProc: m.diaPx, m, bbox: [nx, ny, xx, xy] };
+          }
+        }
+      } else {
+        // เหรียญ/วงกลม
+        const circleArea = Math.PI * (m.lengthPx / 2) ** 2;
+        const fill = px.length / circleArea;           // ใกล้ 1 = วงกลมเต็ม
+        if (aspect < 1.25 && m.solidity > 0.88 && fill > 0.80) {
+          if (!best || px.length > best.area) best = { area: px.length, refDimProc: 2 * Math.sqrt(px.length / Math.PI), m };
         }
       }
     }
     if (!best) return { found: false };
-    const diaPxOrig = best.diaEqProc * scale;
-    const mmpp = +(knownMm / diaPxOrig).toFixed(5);
+    const refDimOrig = best.refDimProc * scale;         // px ต้นฉบับของด้านที่ตรงกับ knownMm
+    const mmpp = +(knownMm / refDimOrig).toFixed(5);
 
-    // วาดวงกลมรอบวัตถุอ้างอิง
+    // วาดกรอบรอบวัตถุอ้างอิงที่ตรวจพบ
     const out = document.createElement('canvas');
     out.width = w; out.height = h;
     const octx = out.getContext('2d');
     octx.drawImage(canvas, 0, 0);
     octx.strokeStyle = '#3b82f6'; octx.lineWidth = Math.max(2, w / 400);
-    octx.beginPath();
-    octx.arc(best.m.mx, best.m.my, best.diaEqProc / 2, 0, Math.PI * 2);
-    octx.stroke();
-    return { found: true, mmpp, diaPx: +diaPxOrig.toFixed(1), annotated: out };
+    if (isCard) {
+      const [nx, ny, xx, xy] = best.bbox;
+      octx.strokeRect(nx, ny, xx - nx, xy - ny);
+    } else {
+      octx.beginPath();
+      octx.arc(best.m.mx, best.m.my, best.refDimProc / 2, 0, Math.PI * 2);
+      octx.stroke();
+    }
+    return { found: true, mmpp, diaPx: +refDimOrig.toFixed(1), annotated: out };
   }
 
 

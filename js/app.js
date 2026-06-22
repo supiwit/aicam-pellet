@@ -49,7 +49,7 @@
     { id: 'coin1', mm: 20.0, th: 'เหรียญ 1 บาท (Ø20.0)', vi: 'Xu (Ø20.0)', en: 'Coin Ø20.0' },
     { id: 'coin5', mm: 24.0, th: 'เหรียญ 5 บาท (Ø24.0)', vi: 'Xu (Ø24.0)', en: 'Coin Ø24.0' },
     { id: 'coin10', mm: 26.0, th: 'เหรียญ 10 บาท (Ø26.0)', vi: 'Xu (Ø26.0)', en: 'Coin Ø26.0' },
-    { id: 'card', mm: 85.6, th: 'บัตร ATM/เครดิต (85.6)', vi: 'Thẻ ATM (85.6)', en: 'ATM/credit card (85.6)' },
+    { id: 'card', mm: 53.98, th: 'บัตร ATM/เครดิต (ด้านสั้น 54)', vi: 'Thẻ ATM (cạnh ngắn 54)', en: 'ATM/credit card (short side 54)' },
   ];
   const refName = id => { const r = REF_OBJECTS.find(x => x.id === id); return r ? (r[I18N.lang] || r.en) : id; };
 
@@ -571,8 +571,8 @@
       $('loading').hidden = false;
       setTimeout(() => {
         try {
-          const r = Analyzer.detectReference(state.img, ref.mm, { polarity: settings.polarity });
-          if (!r.found) { toast(t('cal_auto_fail')); return; }
+          const r = Analyzer.detectReference(state.img, ref.mm, { polarity: settings.polarity, refShape: ref.id === 'card' ? 'card' : 'circle' });
+          if (!r.found) { toast(t(ref.id === 'card' ? 'cal_auto_fail_card' : 'cal_auto_fail')); return; }
           settings.mmpp = r.mmpp;
           saveSettings();
           syncSettingsForm();
@@ -788,6 +788,7 @@
           state.results = { ...res, stats, specResult, spec: r.spec, specAuto: r.auto, yield: yieldResult, productAuto: settings.product };
           state.lastSavedId = null;
           renderResults(true);
+          if (res.blurry) toast('⚠️ ' + t('blur_warn'));
         } catch (err) {
           alert(t('analyze_fail') + ': ' + err.message);
           console.error(err);
@@ -838,6 +839,11 @@
     const rj = $('rejected-note');
     if (rejected > 0) { rj.hidden = false; rj.textContent = '⚠️ ' + t('rejected_note', { n: rejected }); }
     else rj.hidden = true;
+    const bn = $('blur-note');
+    if (bn) {
+      if (state.results.blurry) { bn.hidden = false; bn.textContent = '⚠️ ' + t('blur_warn') + ' (focus ' + state.results.focus + ')'; }
+      else bn.hidden = true;
+    }
 
     renderSpecPanel(animate);
     renderYieldPanel(animate);
@@ -1234,8 +1240,7 @@
    * Particle density (g/cm³) = น้ำหนัก ÷ ปริมาตรเม็ดรวมจากภาพ (Σ π/4·d²·L)
    */
   function computeDensity() {
-    const w = parseFloat($('f-weight').value) || 0;     // กรัม (น้ำหนักเม็ดที่ชั่ง)
-    const cont = parseFloat($('f-volume').value) || 0;  // มล. ปริมาตรภาชนะ (วิธีถ้วยตวง) — ไม่บังคับ
+    const w = parseFloat($('f-weight').value) || 0;     // กรัม (น้ำหนักเม็ดที่ชั่ง = เม็ดในภาพ)
     // ปริมาตรเม็ดวัดจากภาพ: Σ π/4·d²·L (mm³) → cm³
     let imgVol = null, n = 0;
     if (state.results && state.results.pellets && state.results.pellets.length) {
@@ -1244,13 +1249,11 @@
         s + Math.PI / 4 * p.diameter_mm * p.diameter_mm * p.length_mm, 0);
       imgVol = sumMm3 / 1000;                            // cm³
     }
-    let bulk = null, particle = null;
-    if (w > 0 && cont > 0) bulk = w / cont * 1000;       // g/L (ต้องมีปริมาตรภาชนะ)
+    let particle = null;
     if (w > 0 && imgVol && imgVol > 0) particle = w / imgVol; // g/cm³ (น้ำหนัก = เม็ดในภาพ)
     return {
-      weight: w || null, container: cont || null,
+      weight: w || null,
       imgvol_cm3: imgVol != null ? +imgVol.toFixed(3) : null, count: n,
-      bulk_gL: bulk != null ? +bulk.toFixed(0) : null,
       particle_gcm3: particle != null ? +particle.toFixed(3) : null };
   }
   function renderDensity() {
@@ -1266,16 +1269,11 @@
       parts.push(`${t('density_particle')}: <b>${d.particle_gcm3} g/cm³</b> ${ok ? '✓' : '⚠️'}`);
       if (!ok) parts.push(`<span class="hint">⚠️ ${t('density_particle_warn')}</span>`);
     }
-    // 3) ความหนาแน่นรวม (Bulk) = น้ำหนัก ÷ ปริมาตรภาชนะ (ถ้ากรอก)
-    if (d.bulk_gL != null) {
-      const ok = d.bulk_gL >= 350 && d.bulk_gL <= 750;
-      parts.push(`${t('density_bulk')}: <b>${d.bulk_gL} g/L</b> ${ok ? '✓' : '⚠️'}`);
-    }
     out.innerHTML = parts.length ? parts.join('<br>') : t('density_hint');
   }
 
   function initSaveShare() {
-    ['f-weight', 'f-volume'].forEach(id => { const e = $(id); if (e) e.addEventListener('input', renderDensity); });
+    ['f-weight'].forEach(id => { const e = $(id); if (e) e.addEventListener('input', renderDensity); });
     $('btn-save').addEventListener('click', async () => {
       if (!state.results) return;
       const btn = $('btn-save'), st = $('save-status');
@@ -1292,7 +1290,7 @@
           product: settings.product || null,
           shift: settings.shift || null,
           stage: settings.stage || null,
-          density: (() => { const d = computeDensity(); return (d.bulk_gL || d.particle_gcm3) ? d : null; })(),
+          density: (() => { const d = computeDensity(); return (d.particle_gcm3 || d.imgvol_cm3) ? d : null; })(),
           sample_name: $('f-sample').value || null,
           operator: $('f-operator').value || null,
           notes: $('f-notes').value || null,
@@ -1410,7 +1408,7 @@
           ${row(t('st_cv'), (s.cv_pct || 0).toFixed(1) + '%')}
           ${sp && sr ? row('Die ' + sp.die + ' · Insize', sr.insize_pct + '% <span class="badge ' + (sr.pass ? 'pass' : 'fail') + '">' + (sr.pass ? t('csv_pass') : t('csv_fail')) + '</span>') : ''}
           ${y ? row('%Yield (' + yieldMeshLabel(y) + ')', y.yield + '% <span class="badge ' + (y.pass ? 'pass' : 'fail') + '">' + (y.pass ? t('csv_pass') : t('csv_fail')) + '</span>') : ''}
-          ${(() => { const d = computeDensity(); return d.bulk_gL ? row(t('density_bulk'), d.bulk_gL + ' g/L') : ''; })()}
+          ${(() => { const d = computeDensity(); return d.particle_gcm3 ? row(t('density_particle'), d.particle_gcm3 + ' g/cm³') : ''; })()}
           ${ac && ac.lab ? row('CIELAB', 'L*' + (+ac.lab.l).toFixed(1) + ' a*' + (+ac.lab.a).toFixed(1) + ' b*' + (+ac.lab.b).toFixed(1) + (ac.delta_e00 != null ? ' · ΔE00 ' + ac.delta_e00 : '')) : ''}
           ${s.texture ? row(t('tex_title'), s.texture.score + '/100 (' + s.texture.grade + ')') : ''}
         </table>

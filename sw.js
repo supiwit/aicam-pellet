@@ -1,5 +1,5 @@
 /* AICAM Pellet Analyzer — service worker (PWA offline shell) */
-const CACHE = 'aicam-v16';
+const CACHE = 'aicam-v17';
 const ASSETS = [
   './', 'index.html',
   'css/style.css',
