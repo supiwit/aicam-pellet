@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AICAM — ทดสอบความแม่นยำการวัด</title>
+<link rel="icon" href="../icon.svg">
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 16px; color: #1f2937; background: #f8fafc; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p { margin: 0 0 12px; color: #475569; }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid #1b6e5a; background: #1b6e5a; color: #fff; cursor: pointer; }
+  .wrap { overflow-x: auto; margin-top: 12px; }
+  table { border-collapse: collapse; background: #fff; min-width: 720px; }
+  th, td { border: 1px solid #e2e8f0; padding: 5px 9px; text-align: right; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { background: #f1f5f9; }
+  .ok { color: #15803d; } .warn { color: #b45309; } .bad { color: #b91c1c; font-weight: 600; }
+  canvas { max-width: 100%; margin-top: 12px; border: 1px solid #cbd5e1; }
+</style>
+</head>
+<body>
+<h1>ทดสอบความแม่นยำ (ภาพจำลองที่รู้ขนาดจริง)</h1>
+<p>สร้างภาพเลียนแบบหน้างาน (กระดาษขาว เม็ดดำ เงา เบลอ noise วัตถุอ้างอิงค้างในเฟรม) แล้วเทียบค่าที่วัดได้กับขนาดจริงทุกเม็ด</p>
+<button id="run">▶ รันชุดทดสอบทั้งหมด</button>
+<div class="wrap"><table id="tbl"></table></div>
+<canvas id="view" hidden></canvas>
+
+<script src="../js/analyzer.js"></script>
+<script src="synth.js"></script>
+<script>
+const Suite = (() => {
+  // ฉากทดสอบ: ค่าเริ่ม = กระดาษขาว เม็ดดำมุมมน Ø1.8×3.5 มม. กรอบ 200×150 มม. (3200×2400 px)
+  const SCENES = {
+    ideal:     { label: 'อุดมคติ: พื้นเข้ม เม็ดสว่าง ไม่มีเงา คม', bg: 'dark', shape: 'capsule', shadow: null, blur: 0.6, noise: 0, vignette: 0 },
+    real:      { label: 'เหมือนจริง: กระดาษขาว เม็ดดำมุมมน เงา', },
+    flat:      { label: 'เม็ดปลายตัดตรง (ทรงกระบอกตัดมีด)', shape: 'flat' },
+    capsule:   { label: 'เม็ดปลายมน', shape: 'capsule' },
+    die10:     { label: 'เม็ดเล็ก die 1.0 (Ø1.0×2.0)', D: 1.0, L: 2.0, n: 80 },
+    die25:     { label: 'เม็ดใหญ่ (Ø2.5×5.0)', D: 2.5, L: 5.0, n: 40 },
+    blur3:     { label: 'ภาพเบลอ σ=3px', blur: 3 },
+    blur5:     { label: 'ภาพเบลอมาก σ=5px', blur: 5 },
+    shadowHvy: { label: 'เงาเข้ม/ยาว', shadow: { dx: 0.3, dy: 0.34, blur: 0.2, alpha: 0.55 } },
+    noShadow:  { label: 'ไม่มีเงา', shadow: null },
+    brownDark: { label: 'เม็ดน้ำตาลบนพื้นเข้ม', bg: 'dark' },
+    brownWhite:{ label: 'เม็ดน้ำตาลบนกระดาษขาว', pelletRGB: [150, 112, 64] },
+    fish:      { label: 'อาหารปลา (วงรี Ø4.0×5.0)', shape: 'ellipse', D: 4.0, L: 5.0, n: 30, pelletRGB: [128, 96, 54] },
+    hires:     { label: 'มือถือ 12MP (4032×3024)', W: 4032, H: 3024, mmpp: 0.0496 },
+    lowres:    { label: 'ภาพเล็ก (1600×1200)', W: 1600, H: 1200, mmpp: 0.125, blur: 0.7 },
+    spread:    { label: 'ความยาวกระจาย (SD 0.5 มม.)', Lsd: 0.5, Dsd: 0.05, n: 70 },
+    cardDark:  { label: 'มีบัตรสีเข้มในเฟรม', objects: ['card-dark'] },
+    cardLight: { label: 'มีบัตรสีอ่อน (ตัวเลข/ลายพิมพ์) ในเฟรม', objects: ['card-light'] },
+    caliper:   { label: 'มีเวอร์เนียร์ + ลายมือในเฟรม', objects: ['caliper', 'ink'] },
+    touch:     { label: 'มีเม็ดติดกัน 18 คู่ (ต้องคัดออก ไม่วัดผิด)', pairs: 18 },
+    frag:      { label: 'มีเศษเม็ดหักสั้น 25% (ยาวน้อยกว่า Ø)', frag: 0.25, n: 70 },
+    edge:      { label: 'มีเม็ดโดนขอบภาพตัด (ต้องไม่นับ)', edge: 8 },
+    creases:   { label: 'กระดาษมีรอยพับ (แถบเงา)', creases: 6 },
+    cast:      { label: 'เงามือ/มือถือทาบครึ่งภาพ', cast: { x: 0.2, y: 0.25, r: 0.42, alpha: 0.28 } },
+    grayBrown: { label: 'เม็ดน้ำตาลบนพื้นเทา', bg: 'gray', pelletRGB: [128, 94, 52] },
+    glossy:    { label: 'เม็ดมันวาว (แสงสะท้อนเป็นแถบ)', highlight: 1.1 },
+  };
+
+  function stat(a) {
+    const n = a.length; if (!n) return { mean: NaN, sd: NaN };
+    const m = a.reduce((s, v) => s + v, 0) / n;
+    const sd = Math.sqrt(a.reduce((s, v) => s + (v - m) ** 2, 0) / Math.max(1, n - 1));
+    return { mean: m, sd };
+  }
+
+  /** รันหนึ่งฉาก → แถวผลลัพธ์ (ค่าคลาดเคลื่อนเป็น %) */
+  function run(name, extra = {}) {
+    const o = { seed: 7, ...SCENES[name], ...extra };
+    const sc = Synth.scene(o);
+    const t0 = performance.now();
+    const res = Analyzer.analyze(sc.canvas, sc.mmpp, { minLenMm: 1, maxLenMm: 50, maxAspect: 8, autoSplit: true, ...(o.opts || {}) });
+    const ms = Math.round(performance.now() - t0);
+    const P = res.pellets;
+    const row = { scene: name, label: o.label, n_true: sc.truth.length, n_meas: P.length, ms, blurry: !!res.blurry };
+    const hasPos = P.length && typeof P[0].cx === 'number';
+    if (hasPos) {                                  // จับคู่รายเม็ดด้วยตำแหน่ง
+      const used = new Set(); const eL = [], eD = [];
+      let falsePos = 0;
+      for (const p of P) {
+        let best = -1, bd = Infinity;
+        sc.truth.forEach((t, i) => { if (used.has(i)) return; const d = Math.hypot(t.x - p.cx, t.y - p.cy); if (d < bd) { bd = d; best = i; } });
+        if (best >= 0 && bd < (sc.truth[best].L / sc.mmpp) * 0.6) {
+          used.add(best); const t = sc.truth[best];
+          eL.push((p.length_mm - t.L) / t.L * 100); eD.push((p.diameter_mm - t.D) / t.D * 100);
+        } else falsePos++;
+      }
+      const sL = stat(eL), sD = stat(eD);
+      Object.assign(row, { matched: eL.length, false_pos: falsePos, missed: sc.truth.length - eL.length,
+        bias_L: +sL.mean.toFixed(2), sd_L: +sL.sd.toFixed(2), bias_D: +sD.mean.toFixed(2), sd_D: +sD.sd.toFixed(2) });
+    } else {                                       // analyzer รุ่นเก่า: เทียบค่าเฉลี่ยรวม
+      const tL = stat(sc.truth.map(t => t.L)).mean, tD = stat(sc.truth.map(t => t.D)).mean;
+      const mL = stat(P.map(p => p.length_mm)), mD = stat(P.map(p => p.diameter_mm));
+      Object.assign(row, { matched: null, false_pos: Math.max(0, P.length - sc.truth.length), missed: Math.max(0, sc.truth.length - P.length),
+        bias_L: +((mL.mean - tL) / tL * 100).toFixed(2), sd_L: +(mL.sd / tL * 100).toFixed(2),
+        bias_D: +((mD.mean - tD) / tD * 100).toFixed(2), sd_D: +(mD.sd / tD * 100).toFixed(2) });
+    }
+    row._res = res; row._scene = sc;
+    return row;
+  }
+
+  /** คาลิเบรตอัตโนมัติ (บัตร หรือเหรียญ Ø20 มม. เมื่อ objects มี 'coin') → ค่าคลาดเคลื่อนของสเกล (%) */
+  function cal(objects, extra = {}) {
+    const sc = Synth.scene({ seed: 11, n: 50, objects, ...extra });
+    const t0 = performance.now();
+    const coin = objects.includes('coin');
+    const r = Analyzer.detectReference(sc.canvas, coin ? 20 : 53.98, { refShape: coin ? 'circle' : 'card' });
+    return { objects: objects.join('+'), found: !!r.found, mmpp_true: sc.mmpp, mmpp: r.found ? r.mmpp : null,
+      err_pct: r.found ? +((r.mmpp - sc.mmpp) / sc.mmpp * 100).toFixed(2) : null, ms: Math.round(performance.now() - t0), _r: r, _scene: sc };
+  }
+
+  const clean = r => { const c = { ...r }; delete c._res; delete c._scene; delete c._r; return c; };
+  return { SCENES, run, cal, clean };
+})();
+
+// ---- UI: ตารางผล ----
+const cls = (v, a, b) => !isFinite(v) ? 'bad' : Math.abs(v) <= a ? 'ok' : Math.abs(v) <= b ? 'warn' : 'bad';
+document.getElementById('run').addEventListener('click', async () => {
+  const tbl = document.getElementById('tbl');
+  tbl.innerHTML = '<tr><th>ฉาก</th><th>เม็ดจริง</th><th>วัดได้</th><th>นับผิด</th><th>ตกหล่น</th><th>ความยาว bias%</th><th>ความยาว SD%</th><th>Ø bias%</th><th>Ø SD%</th><th>ms</th></tr>';
+  for (const name of Object.keys(Suite.SCENES)) {
+    await new Promise(r => setTimeout(r, 20));
+    const r = Suite.run(name);
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${r.label}</td><td>${r.n_true}</td><td>${r.n_meas}</td>` +
+      `<td class="${r.false_pos ? 'bad' : 'ok'}">${r.false_pos}</td><td class="${r.missed > r.n_true * 0.15 ? 'warn' : 'ok'}">${r.missed}</td>` +
+      `<td class="${cls(r.bias_L, 2, 5)}">${r.bias_L}</td><td class="${cls(r.sd_L, 3, 6)}">${r.sd_L}</td>` +
+      `<td class="${cls(r.bias_D, 2, 5)}">${r.bias_D}</td><td class="${cls(r.sd_D, 3, 6)}">${r.sd_D}</td><td>${r.ms}</td>`;
+    tr.addEventListener('click', () => { const v = document.getElementById('view'); v.hidden = false; v.width = r._res.annotated.width; v.height = r._res.annotated.height; v.getContext('2d').drawImage(r._res.annotated, 0, 0); });
+    tbl.appendChild(tr);
+  }
+});
+</script>
+</body>
+</html>

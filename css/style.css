@@ -160,6 +160,13 @@ body {
 }
 #canvas-main { width: 100%; display: block; touch-action: manipulation; }
 .canvas-wrap.calibrating { outline: 3px dashed var(--accent); cursor: crosshair; }
+.canvas-wrap.calibrating #canvas-main { touch-action: none; }   /* ลากจุดคาลิเบรตโดยหน้าไม่เลื่อน */
+.loupe {
+  position: fixed; z-index: 90; width: 150px; height: 150px; border-radius: 50%;
+  border: 3px solid #fff; box-shadow: 0 6px 22px rgba(0,0,0,.45); pointer-events: none;
+}
+.calib-confirm { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
+.calib-confirm .hint { margin: 0; flex: 1; min-width: 180px; }
 
 .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 10px 0; }
 .stat {

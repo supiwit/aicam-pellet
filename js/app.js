@@ -19,6 +19,8 @@
     procScale: 1,
     calibrating: false,
     calibPts: [],
+    refRegion: null,     // บริเวณวัตถุอ้างอิงในภาพนี้ (พิกัดภาพต้นฉบับ) — ไม่นับเป็นเม็ด + ปิดทับในภาพที่บันทึก
+    calibImage: false,   // คาลิเบรตกับ "ภาพปัจจุบัน" แล้วหรือยัง (ถ่ายด้วยมือ ระยะกล้องเปลี่ยนทุกภาพ)
     results: null,       // { pellets, stats, annotated, rejected, splits, specResult }
     lastSavedId: null,
     charts: {},
@@ -45,11 +47,12 @@
   const shiftName = id => { const s = SHIFTS.find(x => x.id === id); return s ? (s[I18N.lang] || s.en) : (id || ''); };
 
   // วัตถุอ้างอิงสำหรับคาลิเบรตอัตโนมัติ (ข้อ 1) — เส้นผ่านศูนย์กลางจริง (มม.)
+  // บัตรมาตรฐาน ISO ID-1 (ATM/เครดิต/บัตรประชาชน) = 85.60×53.98 มม. — ตัววิเคราะห์ใช้ทั้งสองด้าน
   const REF_OBJECTS = [
+    { id: 'card', mm: 53.98, th: 'บัตร ATM/บัตรประชาชน (85.6×54 มม.)', vi: 'Thẻ ATM/CCCD (85,6×54 mm)', en: 'ATM/ID card (85.6×54 mm)' },
     { id: 'coin1', mm: 20.0, th: 'เหรียญ 1 บาท (Ø20.0)', vi: 'Xu (Ø20.0)', en: 'Coin Ø20.0' },
     { id: 'coin5', mm: 24.0, th: 'เหรียญ 5 บาท (Ø24.0)', vi: 'Xu (Ø24.0)', en: 'Coin Ø24.0' },
     { id: 'coin10', mm: 26.0, th: 'เหรียญ 10 บาท (Ø26.0)', vi: 'Xu (Ø26.0)', en: 'Coin Ø26.0' },
-    { id: 'card', mm: 53.98, th: 'บัตร ATM/เครดิต (ด้านสั้น 54)', vi: 'Thẻ ATM (cạnh ngắn 54)', en: 'ATM/credit card (short side 54)' },
   ];
   const refName = id => { const r = REF_OBJECTS.find(x => x.id === id); return r ? (r[I18N.lang] || r.en) : id; };
 
@@ -156,7 +159,7 @@
     product: 'shrimp',
     shift: '',
     stage: '',
-    refObject: 'coin1',
+    refObject: 'card',
     sampleWeight: 10,           // น้ำหนักชั่งเริ่มต้น (g) สำหรับ density
     colorGain: null,            // ปรับเทียบสี white/grey card {r,g,b}
     webhook: '',                // URL แจ้งเตือน SPC (Discord/Slack/อื่นๆ)
@@ -305,7 +308,7 @@
     el.textContent = msg;
     el.hidden = false;
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => { el.hidden = true; }, 2600);
+    toastTimer = setTimeout(() => { el.hidden = true; }, Math.min(9000, 2200 + msg.length * 45));   // ข้อความยาวอยู่นานขึ้น
   }
 
   /* ================= LOCK SCREEN + ผู้ใช้ (ข้อ 7) ================= */
@@ -571,18 +574,23 @@
       $('loading').hidden = false;
       setTimeout(() => {
         try {
-          const r = Analyzer.detectReference(state.img, ref.mm, { polarity: settings.polarity, refShape: ref.id === 'card' ? 'card' : 'circle' });
-          if (!r.found) { toast(t(ref.id === 'card' ? 'cal_auto_fail_card' : 'cal_auto_fail')); return; }
+          const isCard = ref.id === 'card';
+          const r = Analyzer.detectReference(state.img, ref.mm, { refShape: isCard ? 'card' : 'circle' });
+          if (!r.found) { toast(t(isCard ? 'cal_auto_fail_card' : 'cal_auto_fail')); return; }
           settings.mmpp = r.mmpp;
           saveSettings();
           syncSettingsForm();
           updateCalibStatus();
+          state.refRegion = r.region;                      // วัตถุอ้างอิงจะไม่ถูกนับเป็นเม็ด
+          state.calibImage = true;
           // แสดงภาพที่ตรวจพบวัตถุอ้างอิง
           const c = $('canvas-main');
           c.width = r.annotated.width; c.height = r.annotated.height;
           c.getContext('2d').drawImage(r.annotated, 0, 0);
           state.procScale = state.img.naturalWidth / c.width;
-          toast(t('cal_auto_ok', { mm: ref.mm, px: r.diaPx }));
+          // ด้านยาว/สั้นของบัตรให้สเกลต่างกันมาก = กล้องเอียงไม่ขนานกับพื้น
+          if (Math.abs(r.skewPct) > 3) toast('⚠️ ' + t('cal_skew', { pct: Math.abs(r.skewPct).toFixed(1) }));
+          else toast(isCard ? t('cal_auto_ok_card') : t('cal_auto_ok', { mm: ref.mm, px: r.diaPx }));
         } catch (e) { toast(t('cal_auto_fail')); console.error(e); }
         finally { $('loading').hidden = true; }
       }, 60);
@@ -647,6 +655,8 @@
       c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
       state.procScale = img.naturalWidth / c.width;
       state.results = null;
+      state.refRegion = null;
+      state.calibImage = false;
       state.lastSavedId = null;
       $('card-image').hidden = false;
       $('card-results').hidden = true;
@@ -677,28 +687,62 @@
     state.calibrating = false;
     state.calibPts = [];
     $('calib-hint').hidden = true;
+    $('calib-confirm').hidden = true;
+    $('loupe').hidden = true;
     $('btn-calibrate').textContent = t('cal_btn');
     document.querySelector('.canvas-wrap').classList.remove('calibrating');
     updateCalibStatus();
     if (state.img) redrawBase();
   }
 
+  /** พิกเซลจอ (CSS) ต่อ 1 พิกเซลของ canvas-main */
+  const canvasCss = () => { const c = $('canvas-main'); return c.getBoundingClientRect().width / c.width; };
+
   function redrawBase() {
     const c = $('canvas-main');
     const ctx = c.getContext('2d');
     ctx.drawImage(state.img, 0, 0, c.width, c.height);
-    ctx.fillStyle = '#3b82f6';
+    const u = 1 / (canvasCss() || 1);               // 1 px จอ ในหน่วย canvas → ขนาดจุดคงที่บนทุกจอ
     ctx.strokeStyle = '#3b82f6';
-    ctx.lineWidth = 3;
-    state.calibPts.forEach(p => {
-      ctx.beginPath(); ctx.arc(p.x, p.y, 8, 0, Math.PI * 2); ctx.fill();
-    });
     if (state.calibPts.length === 2) {
+      ctx.lineWidth = 1.5 * u;
       ctx.beginPath();
       ctx.moveTo(state.calibPts[0].x, state.calibPts[0].y);
       ctx.lineTo(state.calibPts[1].x, state.calibPts[1].y);
       ctx.stroke();
     }
+    // จุดคาลิเบรต = วงแหวน + กากบาท (ไม่บังตำแหน่งจริง)
+    state.calibPts.forEach(p => {
+      ctx.lineWidth = 2 * u;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 13 * u, 0, Math.PI * 2); ctx.stroke();
+      ctx.lineWidth = 1 * u;
+      ctx.beginPath();
+      ctx.moveTo(p.x - 7 * u, p.y); ctx.lineTo(p.x + 7 * u, p.y);
+      ctx.moveTo(p.x, p.y - 7 * u); ctx.lineTo(p.x, p.y + 7 * u);
+      ctx.stroke();
+    });
+  }
+
+  /** แว่นขยายตอนวาง/ลากจุดคาลิเบรต: ภาพต้นฉบับรอบจุด ขยาย 8 เท่าของที่เห็นบนจอ + กากบาท */
+  function drawLoupe(p, clientX, clientY) {
+    const lp = $('loupe'), SIZE = 150, ZOOM = 8;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    lp.width = lp.height = SIZE * dpr;
+    const src = SIZE / ZOOM / canvasCss() * state.procScale;      // ด้านของบริเวณที่แสดง (px ภาพต้นฉบับ)
+    const g = lp.getContext('2d');
+    g.fillStyle = '#111'; g.fillRect(0, 0, lp.width, lp.height);
+    g.imageSmoothingEnabled = src > SIZE * dpr;                    // ขยายเกินความละเอียดจริง → โชว์พิกเซลคมๆ
+    g.drawImage(state.img, p.x * state.procScale - src / 2, p.y * state.procScale - src / 2, src, src, 0, 0, lp.width, lp.height);
+    g.strokeStyle = 'rgba(59,130,246,.95)'; g.lineWidth = dpr;
+    g.beginPath();
+    g.moveTo(lp.width / 2, 0); g.lineTo(lp.width / 2, lp.height);
+    g.moveTo(0, lp.height / 2); g.lineTo(lp.width, lp.height / 2);
+    g.stroke();
+    // วางเหนือนิ้ว (ถ้าชิดขอบบนให้ไปอยู่ใต้นิ้ว) และไม่ล้นจอ
+    const top = clientY - SIZE - 70 < 8 ? clientY + 70 : clientY - SIZE - 70;
+    lp.style.left = Math.max(8, Math.min(window.innerWidth - SIZE - 8, clientX - SIZE / 2)) + 'px';
+    lp.style.top = top + 'px';
+    lp.hidden = false;
   }
 
   function initCalibrate() {
@@ -711,29 +755,58 @@
       $('btn-calibrate').textContent = t('cal_cancel');
       document.querySelector('.canvas-wrap').classList.add('calibrating');
       redrawBase();
+      $('calib-hint').scrollIntoView({ behavior: 'smooth', block: 'start' });   // ภาพอยู่ล่างปุ่มหลายแถว → เลื่อนไปที่ภาพ
     });
 
-    $('canvas-main').addEventListener('click', e => {
+    // แตะ = วางจุด · ลาก = ปรับละเอียด (จุดขยับ 30% ของระยะนิ้ว) พร้อมแว่นขยาย → กดยืนยันเมื่อครบ 2 จุด
+    const c = $('canvas-main');
+    let drag = null;
+    c.addEventListener('pointerdown', e => {
       if (!state.calibrating || !state.img) return;
-      const c = $('canvas-main');
-      const r = c.getBoundingClientRect();
-      const x = (e.clientX - r.left) * c.width / r.width;
-      const y = (e.clientY - r.top) * c.height / r.height;
-      state.calibPts.push({ x, y });
-      redrawBase();
-      if (state.calibPts.length === 2) {
-        const [p1, p2] = state.calibPts;
-        const distProc = Math.hypot(p2.x - p1.x, p2.y - p1.y);
-        setTimeout(() => {
-          const mm = parseFloat(prompt(t('cal_prompt'), '100'));
-          if (mm > 0 && distProc > 2) {
-            settings.mmpp = +(mm / (distProc * state.procScale)).toFixed(5);
-            saveSettings();
-            syncSettingsForm();
-          }
-          endCalibration();
-        }, 60);
+      e.preventDefault();
+      const r = c.getBoundingClientRect(), css = r.width / c.width;
+      const x = (e.clientX - r.left) / css, y = (e.clientY - r.top) / css;
+      let idx = state.calibPts.findIndex(p => Math.hypot(p.x - x, p.y - y) * css <= 28);
+      if (idx < 0) {
+        if (state.calibPts.length >= 2) return;
+        state.calibPts.push({ x, y });
+        idx = state.calibPts.length - 1;
       }
+      const p = state.calibPts[idx];
+      drag = { p, sx: e.clientX, sy: e.clientY, ox: p.x, oy: p.y };
+      try { c.setPointerCapture(e.pointerId); } catch { /* บางเบราว์เซอร์ไม่รองรับ — ลากภายในภาพยังใช้ได้ */ }
+      redrawBase();
+      drawLoupe(p, e.clientX, e.clientY);
+    });
+    c.addEventListener('pointermove', e => {
+      if (!drag) return;
+      const k = 0.3 / canvasCss();
+      drag.p.x = Math.max(0, Math.min(c.width, drag.ox + (e.clientX - drag.sx) * k));
+      drag.p.y = Math.max(0, Math.min(c.height, drag.oy + (e.clientY - drag.sy) * k));
+      redrawBase();
+      drawLoupe(drag.p, e.clientX, e.clientY);
+    });
+    const endDrag = () => {
+      if (!drag) return;
+      drag = null;
+      $('loupe').hidden = true;
+      $('calib-confirm').hidden = state.calibPts.length < 2;
+    };
+    c.addEventListener('pointerup', endDrag);
+    c.addEventListener('pointercancel', endDrag);
+
+    $('btn-calib-ok').addEventListener('click', () => {
+      if (state.calibPts.length !== 2) return;
+      const [p1, p2] = state.calibPts;
+      const distProc = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      const mm = parseFloat(prompt(t('cal_prompt'), '100'));
+      if (mm > 0 && distProc > 2) {
+        settings.mmpp = +(mm / (distProc * state.procScale)).toFixed(5);
+        saveSettings();
+        syncSettingsForm();
+        state.calibImage = true;
+      }
+      endCalibration();
     });
   }
 
@@ -765,18 +838,31 @@
   function initAnalyze() {
     $('btn-analyze').addEventListener('click', () => {
       if (!state.img) return;
-      if (!(settings.mmpp > 0)) { alert(t('cal_alert')); return; }
       $('loading-text').textContent = t('analyzing');
       $('loading').hidden = false;
       $('scan-line').hidden = false;
       setTimeout(() => {
         try {
+          // ยังไม่ได้คาลิเบรตกับภาพนี้ → ลองหาบัตรอ้างอิงในภาพแล้วตั้งสเกลเอง (ถ่ายด้วยมือ ระยะกล้องเปลี่ยนทุกภาพ)
+          let staleScale = false;
+          if (!state.calibImage) {
+            const card = Analyzer.detectReference(state.img, 53.98, { refShape: 'card' });
+            if (card.found) {
+              settings.mmpp = card.mmpp;
+              saveSettings(); syncSettingsForm(); updateCalibStatus();
+              state.refRegion = card.region;
+              state.calibImage = true;
+              toast(t('scale_auto'));
+            } else staleScale = true;
+          }
+          if (!(settings.mmpp > 0)) { alert(t('cal_alert')); return; }
           const res = Analyzer.analyze(state.img, +settings.mmpp, {
             polarity: settings.polarity,
             minLenMm: +settings.minlen,
             maxLenMm: +settings.maxlen,
             maxAspect: +settings.maxaspect || 8,
             autoSplit: !!settings.autosplit,
+            exclude: state.refRegion ? [state.refRegion] : [],
           });
           const stats = Analyzer.computeStats(res.pellets, binsArray());
           // ตรวจชนิดอาหารอัตโนมัติจากรูปทรงเม็ด:
@@ -785,7 +871,7 @@
           const r = resolveSpec(res.pellets, stats);
           const specResult = Analyzer.checkSpec(res.pellets, r.spec);
           const yieldResult = computeYield(res.pellets, r.spec);
-          state.results = { ...res, stats, specResult, spec: r.spec, specAuto: r.auto, yield: yieldResult, productAuto: settings.product };
+          state.results = { ...res, stats, specResult, spec: r.spec, specAuto: r.auto, yield: yieldResult, productAuto: settings.product, staleScale };
           state.lastSavedId = null;
           renderResults(true);
           if (res.blurry) toast('⚠️ ' + t('blur_warn'));
@@ -839,9 +925,17 @@
     const rj = $('rejected-note');
     if (rejected > 0) { rj.hidden = false; rj.textContent = '⚠️ ' + t('rejected_note', { n: rejected }); }
     else rj.hidden = true;
+    const sn = $('scale-note');
+    if (sn) {
+      sn.hidden = !state.results.staleScale;
+      if (state.results.staleScale) sn.textContent = 'ℹ️ ' + t('scale_stale', { s: (+settings.mmpp).toFixed(4) });
+    }
     const bn = $('blur-note');
     if (bn) {
-      if (state.results.blurry) { bn.hidden = false; bn.textContent = '⚠️ ' + t('blur_warn') + ' (focus ' + state.results.focus + ')'; }
+      if (state.results.blurry) {
+        bn.hidden = false;
+        bn.textContent = '⚠️ ' + t('blur_warn') + ' (' + t('blur_detail', { mm: state.results.edge_mm.toFixed(2), pct: Math.round(state.results.blur_ratio * 100) }) + ')';
+      }
       else bn.hidden = true;
     }
 
@@ -1414,7 +1508,7 @@
         </table>
       </div>
       <div class="imgs"><img src="${img}"></div></div>
-      <p class="sub">วัดด้วย Max/Min Feret diameter (ISO 13322/9276) · คัดเม็ดติดกัน/สิ่งแปลกปลอม · %Yield จากตะแกรงร่อน mesh</p>
+      <p class="sub">${t('split_note')} · คัดเม็ดติดกัน/สิ่งแปลกปลอม · %Yield จากตะแกรงร่อน mesh</p>
       <button onclick="window.print()" style="padding:10px 18px;font-size:15px;border:none;border-radius:8px;background:#1b6e5a;color:#fff;cursor:pointer">🖨 พิมพ์ / บันทึก PDF</button>
       <script>window.onload=()=>setTimeout(()=>window.print(),400)<\/script>
       </body></html>`;
@@ -2072,16 +2166,18 @@
   }
 
   /* ---------------- สถานะเครือข่าย ---------------- */
+  let netRetry = null, dbDownTold = false;
   async function checkNet() {
     const el = $('net-status');
-    try {
-      const ok = await DB.ping();
-      el.className = 'net-status ' + (ok ? 'online' : 'offline');
-      el.title = ok ? t('net_on') : t('net_off');
-      if (ok) flushOfflineQueue();
-    } catch {
-      el.className = 'net-status offline';
-    }
+    let ok = false;
+    try { ok = await DB.ping(); } catch { /* ถือว่าเชื่อมต่อไม่ได้ */ }
+    el.className = 'net-status ' + (ok ? 'online' : 'offline');
+    el.title = ok ? t('net_on') : t('net_off');
+    clearTimeout(netRetry);
+    if (ok) { dbDownTold = false; flushOfflineQueue(); return; }
+    // มีเน็ตแต่ฐานข้อมูลไม่ตอบ (เช่น ถูกพักเพราะไม่มีการใช้งาน) → แจ้งครั้งเดียว แล้วลองใหม่เป็นระยะ
+    if (navigator.onLine && !dbDownTold) { dbDownTold = true; toast('⚠️ ' + t('db_down')); }
+    netRetry = setTimeout(checkNet, 60000);
   }
 
   /* ---------------- ผู้ใช้ / สิทธิ์ (ข้อ 7) ---------------- */
