@@ -552,3 +552,92 @@ body {
   .modal { align-items: center; }
   .modal-body { border-radius: 18px; }
 }
+
+/* ===================================================================
+ * v19 — หน้าตาทันสมัย: ฟอนต์ Inter + Noto Sans Thai, การ์ดขอบบาง/เงานุ่ม,
+ * หัว/แถบล่างโปร่งแสง, ตัวเลขสถิติอ่านง่าย, แผงรายละเอียดการวัด
+ * =================================================================== */
+:root {
+  --radius: 18px;
+  --line: rgba(15, 23, 42, .08);
+  --shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 24px rgba(15,23,42,.06);
+}
+body {
+  font-family: "Inter", "Noto Sans Thai", -apple-system, "Segoe UI", Roboto, "Sarabun", sans-serif;
+  background:
+    radial-gradient(1200px 500px at 100% -10%, rgba(27,110,90,.10), transparent 60%),
+    radial-gradient(900px 400px at -10% 10%, rgba(59,130,246,.07), transparent 60%),
+    #f4f7f6;
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: .1px;
+}
+.topbar {
+  background: linear-gradient(135deg, rgba(27,110,90,.94), rgba(17,74,60,.94));
+  -webkit-backdrop-filter: saturate(160%) blur(12px); backdrop-filter: saturate(160%) blur(12px);
+  box-shadow: 0 6px 20px rgba(17,74,60,.22);
+}
+.card {
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+  padding: 18px;
+}
+.card h2 { font-size: 18px; font-weight: 700; letter-spacing: -.1px; display: flex; align-items: center; gap: 8px; }
+.card h3 { font-weight: 700; }
+.btn { border-radius: 12px; }
+.btn:not(.primary) { background: #f1f5f4; border: 1px solid var(--line); }
+.btn.primary { background: linear-gradient(135deg, #22a07f, #14614f); box-shadow: 0 6px 16px rgba(27,110,90,.32); }
+select, input[type="text"], input[type="number"] { font-family: inherit; }
+.canvas-wrap { border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line); }
+
+/* ตัวเลขสถิติ */
+.stat-grid { grid-template-columns: repeat(4, 1fr); gap: 10px; }
+@media (max-width: 520px) { .stat-grid { grid-template-columns: repeat(2, 1fr); } }
+.stat {
+  background: linear-gradient(180deg, #ffffff, #f6faf8);
+  border: 1px solid var(--line); border-radius: 14px; padding: 12px 10px; text-align: left;
+  position: relative; overflow: hidden;
+}
+.stat::before { content: ""; position: absolute; left: 0; top: 10px; bottom: 10px; width: 3px; border-radius: 3px; background: linear-gradient(var(--green), #34d399); }
+.stat-num { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -.5px; padding-left: 6px; }
+.stat-label { padding-left: 6px; font-weight: 500; }
+
+/* แผงรายละเอียดการวัด */
+.detail-panel { margin: 6px 0 4px; }
+.detail-panel h3 { margin-top: 10px; }
+.q-chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+@media (max-width: 560px) { .q-chips { grid-template-columns: 1fr; } }
+.q-chip {
+  border: 1px solid var(--line); border-radius: 12px; padding: 9px 11px; background: #fff;
+  display: flex; flex-direction: column; gap: 1px; border-left: 4px solid #94a3b8;
+}
+.q-chip span { font-size: 11.5px; color: var(--muted); font-weight: 600; }
+.q-chip b { font-size: 15px; }
+.q-chip small { font-size: 11.5px; color: var(--muted); }
+.q-chip.ok { border-left-color: var(--ok); }
+.q-chip.warn { border-left-color: #f59e0b; background: #fffbeb; }
+.q-chip.fail { border-left-color: var(--danger); background: #fef2f2; }
+.det-wrap { overflow-x: auto; margin-top: 10px; }
+.det-table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+.det-table th { font-size: 11.5px; color: var(--muted); font-weight: 600; text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.det-table td { text-align: right; padding: 7px 8px; border-bottom: 1px solid var(--line); }
+.det-table th:first-child, .det-table td:first-child { text-align: left; font-weight: 600; }
+
+/* โน้ต/แผงย่อย */
+.info-note, .warn-note { border-radius: 12px; border: 1px solid var(--line); line-height: 1.5; }
+.spec-panel, .yield-panel { border-radius: 16px; border: 1px solid var(--line); }
+
+/* มาตรวัดพื้นที่เก็บ */
+.storage-meter { background: #f8fbfa; border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+.storage-meter .sm-bar { margin-bottom: 10px; height: 9px; }
+.sm-left { font-size: 14px; margin: 2px 0 4px; }
+.sm-left b { color: var(--green-dark); font-size: 16px; }
+
+/* แถบล่างโปร่งแสง */
+.bottom-nav {
+  background: rgba(255,255,255,.86);
+  -webkit-backdrop-filter: saturate(180%) blur(14px); backdrop-filter: saturate(180%) blur(14px);
+  border-top: 1px solid var(--line);
+}
+.nav-btn.active { background: linear-gradient(180deg, #e6f4ef, #d9efe7); }
+.report-item { border: 1px solid var(--line); border-radius: 14px; }

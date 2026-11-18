@@ -21,6 +21,7 @@
     calibPts: [],
     refRegion: null,     // บริเวณวัตถุอ้างอิงในภาพนี้ (พิกัดภาพต้นฉบับ) — ไม่นับเป็นเม็ด + ปิดทับในภาพที่บันทึก
     calibImage: false,   // คาลิเบรตกับ "ภาพปัจจุบัน" แล้วหรือยัง (ถ่ายด้วยมือ ระยะกล้องเปลี่ยนทุกภาพ)
+    scaleSource: null,   // ที่มาของสเกลภาพนี้: card | coin | manual (ไม่มี = ใช้สเกลเดิม)
     results: null,       // { pellets, stats, annotated, rejected, splits, specResult }
     lastSavedId: null,
     charts: {},
@@ -583,6 +584,7 @@
           updateCalibStatus();
           state.refRegion = r.region;                      // วัตถุอ้างอิงจะไม่ถูกนับเป็นเม็ด
           state.calibImage = true;
+          state.scaleSource = isCard ? 'card' : 'coin';
           // แสดงภาพที่ตรวจพบวัตถุอ้างอิง
           const c = $('canvas-main');
           c.width = r.annotated.width; c.height = r.annotated.height;
@@ -610,18 +612,40 @@
     const el = $('storage-meter');
     if (!el) return;
     try {
-      const n = await DB.countSessions();
-      const perKB = 230;                  // ภาพ + ข้อมูลเฉลี่ยต่อล็อต (KB)
-      const usedMB = n * perKB / 1024;
-      const capMB = 1024;                 // Supabase free 1 GB
-      const pct = Math.min(100, usedMB / capMB * 100);
-      const cls = pct >= 85 ? 'fail' : pct >= 60 ? 'warn' : 'ok';
+      // แพ็กเกจฟรี Supabase: คลังรูป 1 GB · ฐานข้อมูล 500 MB
+      const IMG_CAP = 1024 ** 3, DB_CAP = 500 * 1024 ** 2;
+      const REC_BYTES = 15 * 1024;        // ข้อมูลต่อรายงาน (~100 เม็ด, jsonb บีบอัด) โดยประมาณ
+      const since = new Date(Date.now() - 30 * 864e5).toISOString();
+      const [n, n30, img] = await Promise.all([DB.countSessions(), DB.countSince(since), DB.imageUsage()]);
+      const avgImg = img.files ? img.bytes / img.files : 55 * 1024;
+      const dbUsed = n * REC_BYTES;
+      // จำนวนรายงานที่ยังเก็บได้ = ด้านที่เต็มก่อน (รูป หรือ ข้อมูล)
+      const leftByImg = Math.max(0, (IMG_CAP - img.bytes) / avgImg);
+      const leftByDb = Math.max(0, (DB_CAP - dbUsed) / REC_BYTES);
+      const left = Math.floor(Math.min(leftByImg, leftByDb));
+      const mb = b => b < 1024 ** 2 * 10 ? (b / 1024 ** 2).toFixed(1) : Math.round(b / 1024 ** 2).toLocaleString();
+      const bar = (used, cap) => {
+        const pct = Math.min(100, used / cap * 100);
+        const cls = pct >= 85 ? 'fail' : pct >= 60 ? 'warn' : 'ok';
+        return `<div class="sm-bar"><div class="sm-fill ${cls}" style="width:${Math.max(0.6, pct).toFixed(1)}%"></div></div>`;
+      };
+      // ระยะเวลาที่เหลือที่อัตราการใช้ 30 วันล่าสุด
+      let runway = t('storage_rate_none');
+      if (n30 > 0) {
+        const days = left / (n30 / 30);
+        runway = t('storage_rate', { n: n30, time: days > 3650 ? t('storage_10y') : days > 60 ? t('storage_months', { n: Math.round(days / 30) }) : t('storage_days', { n: Math.round(days) }) });
+      }
       el.innerHTML = `
-        <div class="sm-row"><span>☁️ ${t('storage_used', { n })}</span><b>${usedMB.toFixed(0)} / ${capMB} MB</b></div>
-        <div class="sm-bar"><div class="sm-fill ${cls}" style="width:${pct.toFixed(1)}%"></div></div>
-        <div class="hint">${t('storage_left', { n: Math.max(0, Math.round((capMB - usedMB) * 1024 / perKB)) })}</div>`;
-    } catch (e) { el.innerHTML = ''; }
+        <div class="sm-row"><span>🖼 ${t('storage_img', { n: img.files, kb: Math.round(avgImg / 1024) })}</span><b>${mb(img.bytes)} / 1,024 MB</b></div>
+        ${bar(img.bytes, IMG_CAP)}
+        <div class="sm-row"><span>🗂 ${t('storage_used', { n })}</span><b>~${mb(dbUsed)} / 500 MB</b></div>
+        ${bar(dbUsed, DB_CAP)}
+        <div class="sm-left">${t('storage_left', { n: left.toLocaleString() })}</div>
+        <div class="hint">📈 ${runway}</div>
+        <div class="hint">📥 ${t('storage_offline')}</div>`;
+    } catch (e) { el.innerHTML = `<div class="hint">${t('net_off')}</div>`; }
   }
+
 
   /* ---------------- แจ้งเตือน SPC ผ่าน webhook (ข้อ 5) ---------------- */
   let lastAlertKey = '';
@@ -657,6 +681,7 @@
       state.results = null;
       state.refRegion = null;
       state.calibImage = false;
+      state.scaleSource = null;
       state.lastSavedId = null;
       $('card-image').hidden = false;
       $('card-results').hidden = true;
@@ -805,6 +830,7 @@
         saveSettings();
         syncSettingsForm();
         state.calibImage = true;
+        state.scaleSource = 'manual';
       }
       endCalibration();
     });
@@ -852,6 +878,7 @@
               saveSettings(); syncSettingsForm(); updateCalibStatus();
               state.refRegion = card.region;
               state.calibImage = true;
+              state.scaleSource = 'card';
               toast(t('scale_auto'));
             } else staleScale = true;
           }
@@ -871,7 +898,7 @@
           const r = resolveSpec(res.pellets, stats);
           const specResult = Analyzer.checkSpec(res.pellets, r.spec);
           const yieldResult = computeYield(res.pellets, r.spec);
-          state.results = { ...res, stats, specResult, spec: r.spec, specAuto: r.auto, yield: yieldResult, productAuto: settings.product, staleScale };
+          state.results = { ...res, stats, specResult, spec: r.spec, specAuto: r.auto, yield: yieldResult, productAuto: settings.product, staleScale, scaleSource: staleScale ? 'stale' : (state.scaleSource || 'manual') };
           state.lastSavedId = null;
           renderResults(true);
           if (res.blurry) toast('⚠️ ' + t('blur_warn'));
@@ -884,6 +911,39 @@
         }
       }, 420);
     });
+  }
+
+  /** รายละเอียดการวัด: ที่มาของสเกล ความคมภาพ จำนวนที่คัดออก และเปอร์เซ็นไทล์ขนาด */
+  function renderDetail() {
+    const el = $('detail-panel');
+    if (!el) return;
+    const r = state.results, P = r.pellets;
+    if (!P.length) { el.hidden = true; return; }
+    const pct = (arr, p) => {
+      const a = arr.slice().sort((x, y) => x - y), i = (a.length - 1) * p, lo = Math.floor(i), hi = Math.ceil(i);
+      return a[lo] + (a[hi] - a[lo]) * (i - lo);
+    };
+    const mean = a => a.reduce((s, v) => s + v, 0) / a.length;
+    const cv = a => { const m = mean(a); return Math.sqrt(a.reduce((s, v) => s + (v - m) ** 2, 0) / Math.max(1, a.length - 1)) / m * 100; };
+    const row = (label, a) => `<tr><td>${label}</td>${[0.1, 0.5, 0.9].map(p => `<td>${pct(a, p).toFixed(2)}</td>`).join('')}<td><b>${mean(a).toFixed(2)}</b></td><td>${cv(a).toFixed(1)}%</td></tr>`;
+    const src = r.scaleSource || 'stale';
+    const ratio = r.blur_ratio || 0;
+    const sharp = ratio > 0.10 ? 'fail' : ratio > 0.07 ? 'warn' : 'ok';
+    const ex = r.excluded || {};
+    el.hidden = false;
+    el.innerHTML = `
+      <h3>🔎 ${t('det_title')}</h3>
+      <div class="q-chips">
+        <div class="q-chip ${src === 'stale' ? 'warn' : 'ok'}"><span>📐 ${t('det_scale')}</span><b>${t('det_src_' + src)}</b><small>${(+settings.mmpp).toFixed(4)} ${t('cal_unit')}</small></div>
+        <div class="q-chip ${sharp}"><span>🔍 ${t('det_sharp')}</span><b>${t('det_sharp_' + sharp)}</b><small>${t('blur_detail', { mm: (r.edge_mm || 0).toFixed(2), pct: Math.round(ratio * 100) })}</small></div>
+        <div class="q-chip"><span>🧮 ${t('det_counted')}</span><b>${P.length} / ${P.length + (r.rejected || 0)}</b><small>${t('det_excl', { c: ex.clump || 0, b: ex.border || 0, f: (ex.foreign || 0) + (ex.size || 0) })}</small></div>
+      </div>
+      <div class="det-wrap"><table class="det-table">
+        <tr><th>${t('det_unit')}</th><th>D10</th><th>D50</th><th>D90</th><th>${t('det_mean')}</th><th>CV</th></tr>
+        ${row(t('det_len'), P.map(p => p.length_mm))}
+        ${row('Ø', P.map(p => p.diameter_mm))}
+      </table></div>
+      <div class="hint">${t('det_hint', { a: mean(P.map(p => p.length_mm / p.diameter_mm)).toFixed(2) })}</div>`;
   }
 
   /** นับเลขวิ่งขึ้นแบบอนิเมชั่น */
@@ -939,6 +999,7 @@
       else bn.hidden = true;
     }
 
+    renderDetail();
     renderSpecPanel(animate);
     renderYieldPanel(animate);
     renderCharts('chart-bar', 'chart-donut', stats, state.charts, state.results.spec);

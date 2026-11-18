@@ -74,6 +74,28 @@ const DB = (() => {
     return count || 0;
   }
 
+  /** จำนวนรายงานตั้งแต่วันที่กำหนด (ใช้คำนวณอัตราการใช้พื้นที่) */
+  async function countSince(iso) {
+    const { count, error } = await client
+      .from('measurement_sessions')
+      .select('id', { count: 'exact', head: true })
+      .gte('created_at', iso);
+    if (error) throw error;
+    return count || 0;
+  }
+
+  /** ขนาดรูปที่เก็บจริงในคลังรูป (ไล่อ่านทีละ 1000 ไฟล์) → {files, bytes} */
+  async function imageUsage() {
+    let files = 0, bytes = 0;
+    for (let offset = 0; offset < 200000; offset += 1000) {
+      const { data, error } = await client.storage.from(BUCKET).list('', { limit: 1000, offset });
+      if (error) throw error;
+      for (const o of data) { files++; bytes += (o.metadata && o.metadata.size) || 0; }
+      if (data.length < 1000) break;
+    }
+    return { files, bytes };
+  }
+
   // ---- ตั้งค่ามาตรฐานองค์กร (ใช้ร่วมทุกเครื่อง) ----
   async function getConfig() {
     const { data, error } = await client.from('app_config').select('data').eq('id', 'global').maybeSingle();
@@ -86,5 +108,5 @@ const DB = (() => {
     if (error) throw error;
   }
 
-  return { saveSession, listSessions, getSession, deleteSession, ping, countSessions, getConfig, saveConfig };
+  return { saveSession, listSessions, getSession, deleteSession, ping, countSessions, countSince, imageUsage, getConfig, saveConfig };
 })();

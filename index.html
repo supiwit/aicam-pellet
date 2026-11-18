@@ -7,6 +7,9 @@
 <title>AICAM — วัดขนาดเม็ดอาหาร</title>
 <link rel="manifest" href="manifest.json">
 <link rel="apple-touch-icon" href="icon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap">
 <link rel="stylesheet" href="css/style.css">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
@@ -177,6 +180,8 @@
       <div class="stat"><div class="stat-num" id="st-area">–</div><div class="stat-label" data-i18n="st_area"></div></div>
       <div class="stat"><div class="stat-num" id="st-cv">–</div><div class="stat-label" data-i18n="st_cv"></div></div>
     </div>
+
+    <div id="detail-panel" class="detail-panel" hidden></div>
 
     <div id="split-note" class="info-note" hidden></div>
     <div id="rejected-note" class="warn-note" hidden></div>
